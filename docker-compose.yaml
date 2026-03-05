@@ -1,26 +1,41 @@
-version: '3.8'
-
 services:
   app:
-    build: .
+    # Point directly to your new GitHub Container Registry image
+    image: ghcr.io/Gallenhamph/email-reply-agent:main
+    container_name: sophos_email_automator
+    restart: unless-stopped
+    environment:
+      - OLLAMA_URL=http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
-      - ./app.py:/app/app.py
+      # We only map your dynamic data folders now. The code lives inside the image!
       - ./transcripts:/app/transcripts
       - ./outputs:/app/outputs
       - ./attachments:/app/attachments
       - ./seeds:/app/seeds
-    environment:
-      # host.docker.internal routes traffic from Docker to your Mac's native Ollama
-      - OLLAMA_URL=http://host.docker.internal:11434
     depends_on:
       - chromadb
+    labels:
+      # Tell Watchtower it is allowed to update this specific container
+      - "com.centurylinklabs.watchtower.enable=true"
 
   chromadb:
     image: chromadb/chroma:latest
+    container_name: sophos_chromadb
+    restart: unless-stopped
+    volumes:
+      - ./chroma_data:/chroma/chroma
     ports:
       - "8000:8000"
-    volumes:
-      - chroma_data:/chroma/chroma
 
-volumes:
-  chroma_data:
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: --interval 300 --label-enable --cleanup
+    # interval 300 = check GitHub every 5 minutes
+    # label-enable = only update containers with the watchtower label (so it doesn't break other apps on your Mac)
+    # cleanup = delete old images after updating to save hard drive space
