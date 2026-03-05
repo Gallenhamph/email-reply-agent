@@ -1,6 +1,7 @@
 import os
 import time
 import mimetypes
+import re
 import chromadb
 import markdown # Added for HTML email rendering
 from email.message import EmailMessage
@@ -40,14 +41,16 @@ TRANSCRIPT:
 """)
 
 EMAIL_PROMPT = PromptTemplate.from_template("""
-You are an expert Sales Engineer representing Sophos and Secureworks. Your task is to write a BRAND NEW, original follow-up email to a customer based specifically on the MEETING TRANSCRIPT provided below.
+You are an expert Sales Engineer representing Sophos and Secureworks. Your task is to write a short, punchy follow-up email based on the meeting transcript.
 
 STRICT RULES:
-1. Do NOT use words like: delve, robust, tailored, seamless, testament, crucial, or "I hope this email finds you well."
-2. Keep it concise. Address the specific concerns and action items from the meeting.
-3. Use the LIVE WEB DATA to include accurate public context. Hyperlink references back to the source URLs from sophos.com and secureworks.com using Markdown.
-4. Mention that you have attached any relevant documents identified in the LOCAL PDF KNOWLEDGE.
-5. You MUST adopt the tone, greeting, and sign-off style shown in the EXAMPLE EMAILS below, but you absolutely MUST NOT copy their content. The email must be entirely about the current MEETING TRANSCRIPT.
+1. BRIEF RECAP: Begin the email with a highly concise (1 to 2 sentences max) summary of the salient business problems or goals discussed to anchor the conversation.
+2. ACTION ITEMS: After the brief recap, focus strictly on deliverables (files/links), open questions, and next steps. 
+3. Do NOT use words like: delve, robust, tailored, seamless, testament, crucial, or "I hope this email finds you well."
+4. Use the LIVE WEB DATA to include accurate public context and hyperlink references using Markdown.
+5. Mention that you have attached any relevant documents identified in the LOCAL PDF KNOWLEDGE.
+6. You MUST adopt the tone and structure of the EXAMPLE EMAILS. Do NOT copy their exact content.
+7. OUTPUT FORMAT: You must output ONLY the raw email text. Do NOT include any introductory preambles (e.g., "Here is your email") and do NOT include any concluding remarks. Start directly with the greeting.
 
 <EXAMPLE_EMAILS>
 Example 1:
@@ -278,7 +281,7 @@ Kind regards,
 {transcript}
 </MEETING_TRANSCRIPT>
 
-Write the new, customized email draft below:
+Output the email draft immediately below this line, starting with the greeting:
 """)
 
 def ingest_pdfs_on_startup():
@@ -352,6 +355,17 @@ class TranscriptHandler(FileSystemEventHandler):
             "pdf_data": pdf_context,
             "transcript": transcript
         })
+        
+        print("[-] Step 4.5: Slicing off AI preambles...")
+        # This searches for the first instance of a standard greeting at the start of a line
+        # and deletes everything the AI said before it.
+        match = re.search(r'^(Hi\s|Hello\s|Dear\s|Hey\s|Good\s)', email_body, re.MULTILINE | re.IGNORECASE)
+        if match:
+            email_body = email_body[match.start():]
+            
+        # Optional: Clean up postambles (e.g., if it adds "Let me know if you need changes!" after your name)
+        # This stops the email at the first blank line after your sign-off name.
+        # (Assuming your name is at the end of the template).
         
         return email_body, list(files_to_attach)
 
