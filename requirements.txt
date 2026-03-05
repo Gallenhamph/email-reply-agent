@@ -1,0 +1,9 @@
+watchdog
+langchain
+langchain-community
+langchain-ollama
+ddgs
+pypdf
+chromadb
+markdown
+cryptography

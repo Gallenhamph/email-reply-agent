@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    volumes:
+      - ./transcripts:/app/transcripts
+      - ./outputs:/app/outputs
+      - ./attachments:/app/attachments
+      - ./app.py:/app/app.py
+    environment:
+      # host.docker.internal routes traffic from Docker to your Mac's native Ollama
+      - OLLAMA_URL=http://host.docker.internal:11434
+    depends_on:
+      - chromadb
+
+  chromadb:
+    image: chromadb/chroma:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+
+volumes:
+  chroma_data:
