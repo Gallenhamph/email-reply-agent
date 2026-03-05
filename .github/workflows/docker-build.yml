@@ -1,0 +1,21 @@
+name: Docker Build Check
+
+# This tells GitHub to run this script every time you push to the 'main' branch
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest # GitHub provides a temporary Linux machine
+
+    steps:
+    # Step 1: GitHub downloads your code onto the temporary machine
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    # Step 2: GitHub attempts to build your Docker image
+    - name: Build the Docker image
+      run: docker compose build
