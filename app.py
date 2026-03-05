@@ -40,19 +40,18 @@ TRANSCRIPT:
 """)
 
 EMAIL_PROMPT = PromptTemplate.from_template("""
-You are an expert Sales Engineer representing Sophos and Secureworks. Write a follow-up email to a customer based on the meeting transcript.
+You are an expert Sales Engineer representing Sophos and Secureworks. Your task is to write a BRAND NEW, original follow-up email to a customer based specifically on the MEETING TRANSCRIPT provided below.
 
 STRICT RULES:
 1. Do NOT use words like: delve, robust, tailored, seamless, testament, crucial, or "I hope this email finds you well."
-2. Match the exact tone and structure of the "EXAMPLE EMAILS" provided below.
-3. Keep it concise. Address specific concerns from the meeting.
-4. Use the "LIVE WEB DATA" to include accurate public context. You MUST hyperlink references back to the source URLs from sophos.com and secureworks.com as evidence using Markdown (e.g., [read more about Taegis here](https://www.secureworks.com/...)).
-5. Explicitly mention that you have attached the relevant documents identified in the LOCAL PDF KNOWLEDGE.
+2. Keep it concise. Address the specific concerns and action items from the meeting.
+3. Use the LIVE WEB DATA to include accurate public context. Hyperlink references back to the source URLs from sophos.com and secureworks.com using Markdown.
+4. Mention that you have attached any relevant documents identified in the LOCAL PDF KNOWLEDGE.
+5. You MUST adopt the tone, greeting, and sign-off style shown in the EXAMPLE EMAILS below, but you absolutely MUST NOT copy their content. The email must be entirely about the current MEETING TRANSCRIPT.
 
-EXAMPLE EMAILS (Mimic this exact writing style):
----
+<EXAMPLE_EMAILS>
 Example 1:
-HHi <customer>,
+Hi <customer>,
 
 Thank you for your time on the call today.  I’m sorry that it was under these difficult circumstances; however I appreciate you talking through the incident with me and discussing how Sophos may be able to assist moving forwards.
 
@@ -265,18 +264,21 @@ Thanks again for attending today.  If there’s anything further that you want t
 Kind regards,
 
 
----
+</EXAMPLE_EMAILS>
 
-LIVE WEB DATA (Sophos & Secureworks):
+<LIVE_WEB_DATA>
 {web_data}
+</LIVE_WEB_DATA>
 
-LOCAL PDF KNOWLEDGE:
+<LOCAL_PDF_KNOWLEDGE>
 {pdf_data}
+</LOCAL_PDF_KNOWLEDGE>
 
-MEETING TRANSCRIPT / ACTION ITEMS:
+<MEETING_TRANSCRIPT>
 {transcript}
+</MEETING_TRANSCRIPT>
 
-Draft the email below using Markdown for hyperlinks:
+Write the new, customized email draft below:
 """)
 
 def ingest_pdfs_on_startup():
