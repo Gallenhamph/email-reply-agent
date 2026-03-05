@@ -4,10 +4,11 @@ services:
   app:
     build: .
     volumes:
+      - ./app.py:/app/app.py
       - ./transcripts:/app/transcripts
       - ./outputs:/app/outputs
       - ./attachments:/app/attachments
-      - ./app.py:/app/app.py
+      - ./seeds:/app/seeds
     environment:
       # host.docker.internal routes traffic from Docker to your Mac's native Ollama
       - OLLAMA_URL=http://host.docker.internal:11434
