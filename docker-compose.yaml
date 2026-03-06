@@ -1,7 +1,7 @@
 services:
   app:
-    # Point directly to your new GitHub Container Registry image
-    image: ghcr.io/Gallenhamph/email-reply-agent:main
+    # -> CHANGE THIS LINE to your actual details <-
+    image: ghcr.io/gallenhamph/email-reply-agent:main
     container_name: sophos_email_automator
     restart: unless-stopped
     environment:
@@ -9,7 +9,6 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      # We only map your dynamic data folders now. The code lives inside the image!
       - ./transcripts:/app/transcripts
       - ./outputs:/app/outputs
       - ./attachments:/app/attachments
@@ -17,7 +16,6 @@ services:
     depends_on:
       - chromadb
     labels:
-      # Tell Watchtower it is allowed to update this specific container
       - "com.centurylinklabs.watchtower.enable=true"
 
   chromadb:
@@ -36,6 +34,3 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     command: --interval 300 --label-enable --cleanup
-    # interval 300 = check GitHub every 5 minutes
-    # label-enable = only update containers with the watchtower label (so it doesn't break other apps on your Mac)
-    # cleanup = delete old images after updating to save hard drive space
