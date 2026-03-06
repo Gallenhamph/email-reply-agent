@@ -194,6 +194,19 @@ def package_eml_file(body: str, attachments: list, source_path: str):
 # ==========================================
 # EVENT HANDLER
 # ==========================================
+class AttachmentHandler(FileSystemEventHandler):
+    def on_created(self, event):
+        # Ignore directories and non-PDF files
+        if event.is_directory or not event.src_path.lower().endswith('.pdf'):
+            return
+        
+        logger.info(f"New PDF detected: {event.src_path}")
+        time.sleep(2) # Give macOS a second to finish copying the large file
+        
+        # Re-run the ingestion function to update ChromaDB with the new file
+        logger.info("Rebuilding vector database with new attachments...")
+        ingest_pdfs_on_startup()
+        
 class TranscriptHandler(FileSystemEventHandler):
     def on_created(self, event):
         if event.is_directory or not event.src_path.endswith('.txt'):
@@ -252,16 +265,28 @@ if __name__ == "__main__":
     setup_directories()
     ingest_pdfs_on_startup()
 
-    event_handler = TranscriptHandler()
-    observer = PollingObserver()
-    observer.schedule(event_handler, path=TRANSCRIPTS_DIR, recursive=False)
+    # 1. Start watching Transcripts
+    transcript_handler = TranscriptHandler()
+    transcript_observer = PollingObserver()
+    transcript_observer.schedule(transcript_handler, path=TRANSCRIPTS_DIR, recursive=False)
+    
+    # 2. Start watching Attachments
+    attachment_handler = AttachmentHandler()
+    attachment_observer = PollingObserver()
+    attachment_observer.schedule(attachment_handler, path=ATTACHMENTS_DIR, recursive=False)
     
     logger.info(f"Watching for transcripts in {TRANSCRIPTS_DIR}...")
-    observer.start()
+    logger.info(f"Watching for new PDFs in {ATTACHMENTS_DIR}...")
+    
+    transcript_observer.start()
+    attachment_observer.start()
     
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        observer.stop()
-    observer.join()
+        transcript_observer.stop()
+        attachment_observer.stop()
+        
+    transcript_observer.join()
+    attachment_observer.join()
