@@ -48,9 +48,13 @@ chroma_client = chromadb.HttpClient(host="chromadb", port=8000)
 # ==========================================
 # PROMPT TEMPLATES
 # ==========================================
+
 EXTRACTION_PROMPT = PromptTemplate.from_template("""
-You are a helpful assistant. Read the following meeting notes and identify the primary cybersecurity products, tools, or services discussed. 
-Return ONLY a comma-separated list of the product names. Do not write a sentence. If none are found, return "Sophos and Secureworks".
+You are an expert cybersecurity architect. Read the following raw voice-to-text meeting transcript and identify the primary cybersecurity products, tools, or services discussed. 
+
+CRITICAL RULE: The transcript contains phonetic spelling errors, misheard words, and broken acronyms (e.g., "Sofos" instead of "Sophos", "manage thread response" instead of "MDR", "secure works" instead of "Secureworks"). You MUST correct these to their proper industry names.
+
+Return ONLY a comma-separated list of the properly spelled product names. Do not write a sentence. If none are found, return "Sophos and Secureworks".
 
 TRANSCRIPT:
 {transcript}
@@ -61,13 +65,14 @@ You are an expert Sales Engineer representing Sophos and Secureworks. Your task 
 
 STRICT RULES:
 1. PERSPECTIVE & PRONOUNS (CRITICAL): You are writing directly TO the customer. You MUST translate third-person meeting notes into direct address (e.g., "you asked"). Use "we/our" when referring to Sophos/Secureworks capabilities.
-2. BRIEF RECAP: Begin the email with a highly concise (1 to 2 sentences max) summary of the salient business problems or goals discussed.
-3. ACTION ITEMS: After the brief recap, focus strictly on deliverables, open questions, and next steps. 
-4. Do NOT use words like: delve, robust, tailored, seamless, testament, crucial, or "I hope this email finds you well."
-5. Use the LIVE WEB DATA to include accurate public context and hyperlink references using Markdown.
-6. Mention that you have attached any relevant documents identified in the LOCAL PDF KNOWLEDGE.
-7. You MUST adopt the tone and structure of the EXAMPLE EMAILS. Do NOT copy their exact content.
-8. OUTPUT FORMAT: You must output ONLY the raw email text. Start directly with the greeting.
+2. TRANSCRIPTION CORRECTION (CRITICAL): The meeting transcript is from a voice-to-text tool and contains phonetic errors, misheard terms, and missing context. Use your expert cybersecurity domain knowledge to automatically correct terms (e.g., "Sofos" -> "Sophos") and intelligently fill in any blanks to make the technology references accurate and professional.
+3. BRIEF RECAP: Begin the email with a highly concise (1 to 2 sentences max) summary of the salient business problems or goals discussed.
+4. ACTION ITEMS: After the brief recap, focus strictly on deliverables, open questions, and next steps. 
+5. Do NOT use words like: delve, robust, tailored, seamless, testament, crucial, or "I hope this email finds you well."
+6. Use the LIVE WEB DATA to include accurate public context and hyperlink references using Markdown.
+7. Mention that you have attached any relevant documents identified in the LOCAL PDF KNOWLEDGE.
+8. You MUST adopt the tone and structure of the EXAMPLE EMAILS. Do NOT copy their exact content.
+9. OUTPUT FORMAT: You must output ONLY the raw email text. Start directly with the greeting.
 
 <EXAMPLE_EMAILS>
 {seed_emails}
