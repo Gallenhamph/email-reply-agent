@@ -1,12 +1,17 @@
-# Use the full Python image instead of -slim to ensure build tools are present
-FROM python:3.11
+# Use a lightweight Python base image
+FROM python:3.11-slim
 
+# Set the working directory inside the container
 WORKDIR /app
 
+# Copy the requirements file first (this caches dependencies to make future builds faster)
 COPY requirements.txt .
 
-# Upgrade pip first, then install requirements
-RUN pip install --upgrade pip
+# Install the Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-CMD ["python", "-u", "app.py"]
+# CRITICAL: Copy your actual application code INTO the container
+COPY app.py .
+
+# Command to run the application
+CMD ["python", "app.py"]
