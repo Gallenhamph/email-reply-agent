@@ -26,11 +26,3 @@ services:
       - ./chroma_data:/chroma/chroma
     ports:
       - "8000:8000"
-
-  watchtower:
-    image: containrrr/watchtower
-    container_name: watchtower
-    restart: always
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    command: --interval 300 --label-enable --cleanup
