@@ -1,29 +1,40 @@
 import os
 import time
 import mimetypes
+import logging
 import re
 import chromadb
-import markdown # Added for HTML email rendering
+import markdown
 import pymupdf4llm
-from langchain_core.documents import Document
 from email.message import EmailMessage
+
 from watchdog.observers.polling import PollingObserver
 from watchdog.events import FileSystemEventHandler
 
 # LangChain Imports
 from langchain_ollama import OllamaLLM, OllamaEmbeddings
 from langchain_core.prompts import PromptTemplate
+from langchain_core.documents import Document
 from langchain_community.tools import DuckDuckGoSearchResults
-from langchain_community.document_loaders import PyPDFDirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 
-# Configuration
+# ==========================================
+# CONFIGURATION & SETUP
+# ==========================================
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
+
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://host.docker.internal:11434")
-TRANSCRIPTS_DIR = "/app/transcripts"
-OUTPUTS_DIR = "/app/outputs"
-ATTACHMENTS_DIR = "/app/attachments"
-SEEDS_DIR = "/app/seeds" # <--- Add this line
+BASE_DIR = "/app"
+TRANSCRIPTS_DIR = os.path.join(BASE_DIR, "transcripts")
+OUTPUTS_DIR = os.path.join(BASE_DIR, "outputs")
+ATTACHMENTS_DIR = os.path.join(BASE_DIR, "attachments")
+SEEDS_DIR = os.path.join(BASE_DIR, "seeds")
 
 # Initialize Models and Tools
 llm = OllamaLLM(model="llama3.1", base_url=OLLAMA_URL)
@@ -32,9 +43,10 @@ search_tool = DuckDuckGoSearchResults()
 
 # Initialize ChromaDB Client
 chroma_client = chromadb.HttpClient(host="chromadb", port=8000)
-vector_store = Chroma(client=chroma_client, collection_name="sophos_docs", embedding_function=embeddings)
 
-# --- PROMPT TEMPLATES ---
+# ==========================================
+# PROMPT TEMPLATES
+# ==========================================
 EXTRACTION_PROMPT = PromptTemplate.from_template("""
 You are a helpful assistant. Read the following meeting notes and identify the primary cybersecurity products, tools, or services discussed. 
 Return ONLY a comma-separated list of the product names. Do not write a sentence. If none are found, return "Sophos and Secureworks".
@@ -75,183 +87,178 @@ STRICT RULES:
 Output the email draft immediately below this line, starting with the greeting:
 """)
 
-def ingest_pdfs_on_startup():
-    print("\n[*] Checking for new PDFs in /attachments to index using PyMuPDF Markdown Extraction...")
-    
-    documents = []
-    
-    # Iterate through all PDFs in the folder
-    for filename in os.listdir(ATTACHMENTS_DIR):
-        if filename.lower().endswith(".pdf"):
-            file_path = os.path.join(ATTACHMENTS_DIR, filename)
-            print(f"[*] Parsing {filename} into Markdown...")
-            
-            try:
-                # Extract the PDF as formatted Markdown (preserves tables and structure)
-                md_text = pymupdf4llm.to_markdown(file_path)
-                
-                # Create a LangChain Document object
-                doc = Document(page_content=md_text, metadata={"source": file_path})
-                documents.append(doc)
-            except Exception as e:
-                print(f"[!] Failed to parse {filename}: {e}")
+# ==========================================
+# CORE FUNCTIONS
+# ==========================================
+def setup_directories():
+    """Ensure all required directories exist."""
+    for d in [TRANSCRIPTS_DIR, OUTPUTS_DIR, ATTACHMENTS_DIR, SEEDS_DIR]:
+        os.makedirs(d, exist_ok=True)
 
-    if not documents:
-        print("[*] No PDFs found or parsed. Skipping database insertion.")
-        return
-
-    # Split the Markdown documents into manageable chunks
-    print("[*] Splitting Markdown into chunks for ChromaDB...")
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=300)
-    splits = text_splitter.split_documents(documents)
-    
-    # Optional: Clear the database before adding to prevent duplicates on restart
-    # (Since we are loading everything at startup for this local app)
-    vector_store.add_documents(splits)
-    print(f"[*] Successfully indexed {len(splits)} Markdown chunks into ChromaDB!")
-
-    def load_seed_emails():
+def load_seed_emails() -> str:
+    """Dynamically load few-shot examples from the seeds directory."""
     seeds_text = ""
-    if not os.path.exists(SEEDS_DIR):
-        return seeds_text
-        
     for filename in os.listdir(SEEDS_DIR):
         if filename.endswith(".txt"):
             filepath = os.path.join(SEEDS_DIR, filename)
             with open(filepath, 'r', encoding='utf-8') as f:
                 seeds_text += f"--- Example: {filename} ---\n{f.read().strip()}\n\n"
                 
-    if not seeds_text:
-        seeds_text = "No seed examples provided. Please use a professional, concise Sales Engineer tone."
-        
-    return seeds_text
+    return seeds_text or "No seed examples provided. Please use a professional, concise Sales Engineer tone."
 
+def get_vector_store() -> Chroma:
+    """Retrieves or creates the Chroma vector store collection."""
+    return Chroma(client=chroma_client, collection_name="sophos_docs", embedding_function=embeddings)
+
+def ingest_pdfs_on_startup():
+    """Reads PDFs, converts to Markdown, and loads into ChromaDB."""
+    logger.info("Checking for new PDFs in /attachments to index...")
+    
+    # Reset collection to prevent duplicate chunks on restart
+    try:
+        chroma_client.delete_collection("sophos_docs")
+        logger.info("Cleared old database collection for fresh ingestion.")
+    except Exception:
+        pass # Collection didn't exist yet
+
+    vector_store = get_vector_store()
+    documents = []
+    
+    for filename in os.listdir(ATTACHMENTS_DIR):
+        if filename.lower().endswith(".pdf"):
+            file_path = os.path.join(ATTACHMENTS_DIR, filename)
+            logger.info(f"Parsing {filename} into Markdown...")
+            try:
+                md_text = pymupdf4llm.to_markdown(file_path)
+                doc = Document(page_content=md_text, metadata={"source": file_path})
+                documents.append(doc)
+            except Exception as e:
+                logger.error(f"Failed to parse {filename}: {e}")
+
+    if not documents:
+        logger.info("No PDFs found or parsed. Skipping database insertion.")
+        return
+
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=300)
+    splits = text_splitter.split_documents(documents)
+    
+    vector_store.add_documents(splits)
+    logger.info(f"Successfully indexed {len(splits)} Markdown chunks into ChromaDB!")
+
+def execute_web_search(topics: str) -> str:
+    """Queries DuckDuckGo for live data across specified domains."""
+    web_results = ""
+    for domain in ["sophos.com", "secureworks.com"]:
+        try:
+            res = search_tool.run(f"site:{domain} {topics}")
+            web_results += f"{domain.upper()} RESULTS:\n{res}\n\n"
+        except Exception as e:
+            logger.warning(f"Search failed for {domain}: {e}")
+            
+    return web_results.strip() or "No live web data available at this time."
+
+def package_eml_file(body: str, attachments: list, source_path: str):
+    """Wraps the generated Markdown text into a rich HTML .eml file."""
+    msg = EmailMessage()
+    msg['Subject'] = "Follow-up regarding our recent discussion"
+    msg['From'] = "youremail@yourcompany.com" 
+    msg['To'] = "customer@example.com"
+    msg['X-Unsent'] = '1' # Forces Outlook to open as a draft
+    
+    msg.set_content(body)
+    
+    html_body = markdown.markdown(body)
+    full_html = f"<html><body>{html_body}</body></html>"
+    msg.add_alternative(full_html, subtype='html')
+
+    for filename in attachments:
+        filepath = os.path.join(ATTACHMENTS_DIR, filename)
+        if os.path.exists(filepath):
+            ctype, encoding = mimetypes.guess_type(filepath)
+            if ctype is None or encoding is not None:
+                ctype = 'application/octet-stream'
+            maintype, subtype = ctype.split('/', 1)
+            
+            with open(filepath, 'rb') as f:
+                msg.add_attachment(f.read(), maintype=maintype, subtype=subtype, filename=filename)
+                logger.info(f"Attached document: {filename}")
+
+    base_name = os.path.basename(source_path).replace('.txt', '')
+    output_file = os.path.join(OUTPUTS_DIR, f"Draft_{base_name}.eml")
+    
+    with open(output_file, 'wb') as f:
+        f.write(bytes(msg))
+    
+    logger.info(f"Success! Ready to send: {output_file}")
+
+# ==========================================
+# EVENT HANDLER
+# ==========================================
 class TranscriptHandler(FileSystemEventHandler):
     def on_created(self, event):
         if event.is_directory or not event.src_path.endswith('.txt'):
             return
         
-        print(f"\n[+] New transcript detected: {event.src_path}")
-        time.sleep(1) 
+        logger.info(f"New transcript detected: {event.src_path}")
+        time.sleep(1) # Ensure file system lock releases
         
         with open(event.src_path, 'r', encoding='utf-8') as f:
-            transcript_text = f.read()
+            transcript = f.read()
 
-        email_body, dynamic_attachments = self.process_and_generate(transcript_text)
-        self.create_eml_file(email_body, dynamic_attachments, event.src_path)
-
-    def process_and_generate(self, transcript):
-        print("[-] Step 1: Extracting key topics...")
-        extraction_chain = EXTRACTION_PROMPT | llm
-        topics = extraction_chain.invoke({"transcript": transcript}).strip()
-        print(f"[-] Topics found: {topics}")
-
-        print("[-] Step 2: Searching site:sophos.com AND site:secureworks.com...")
-        web_results = ""
         try:
-            sophos_res = search_tool.run(f"site:sophos.com {topics}")
-            web_results += f"SOPHOS RESULTS:\n{sophos_res}\n\n"
-        except Exception:
-            pass
+            # 1. Topic Extraction
+            logger.info("Extracting key topics...")
+            topics = (EXTRACTION_PROMPT | llm).invoke({"transcript": transcript}).strip()
             
-        try:
-            secureworks_res = search_tool.run(f"site:secureworks.com {topics}")
-            web_results += f"SECUREWORKS RESULTS:\n{secureworks_res}\n\n"
-        except Exception:
-            pass
+            # 2. Live Web Search
+            logger.info(f"Searching web for topics: {topics}")
+            web_data = execute_web_search(topics)
 
-        if not web_results.strip():
-            web_results = "No live web data available at this time."
-
-        print("[-] Step 3: Querying ChromaDB for local PDF context...")
-        pdf_results = vector_store.similarity_search(topics, k=3)
-        pdf_context = ""
-        files_to_attach = set() 
-
-        for doc in pdf_results:
-            pdf_context += f"Source File: {doc.metadata['source']}\nContent: {doc.page_content}\n\n"
-            filename = os.path.basename(doc.metadata['source'])
-            files_to_attach.add(filename)
-
-        print(f"[-] Identified attachments: {files_to_attach}")
-
-print("[-] Step 4: Generating final email with Llama 3.1...")
-        
-        # Load the latest seeds right before generating
-        current_seeds = load_seed_emails() 
-        
-        email_chain = EMAIL_PROMPT | llm
-        email_body = email_chain.invoke({
-            "seed_emails": current_seeds, # <--- Inject the seeds here
-            "web_data": web_results,
-            "pdf_data": pdf_context,
-            "transcript": transcript
-        })
-        
-        print("[-] Step 4.5: Slicing off AI preambles...")
-        # This searches for the first instance of a standard greeting at the start of a line
-        # and deletes everything the AI said before it.
-        match = re.search(r'^(Hi\s|Hello\s|Dear\s|Hey\s|Good\s)', email_body, re.MULTILINE | re.IGNORECASE)
-        if match:
-            email_body = email_body[match.start():]
+            # 3. Vector Database Retrieval
+            logger.info("Querying ChromaDB for local PDF context...")
+            vector_store = get_vector_store()
+            pdf_results = vector_store.similarity_search(topics, k=3)
             
-        # Optional: Clean up postambles (e.g., if it adds "Let me know if you need changes!" after your name)
-        # This stops the email at the first blank line after your sign-off name.
-        # (Assuming your name is at the end of the template).
-        
-        return email_body, list(files_to_attach)
+            pdf_context = ""
+            files_to_attach = set() 
+            for doc in pdf_results:
+                pdf_context += f"Source File: {doc.metadata['source']}\nContent: {doc.page_content}\n\n"
+                files_to_attach.add(os.path.basename(doc.metadata['source']))
 
-    def create_eml_file(self, body, attachments, source_path):
-        print("[-] Step 5: Packaging .eml file with HTML links...")
-        msg = EmailMessage()
-        msg['Subject'] = "Follow-up regarding our recent discussion"
-        msg['From'] = "youremail@yourcompany.com" 
-        msg['To'] = "customer@example.com"
-        
-        # --- THE MAGIC LINE FOR OUTLOOK DRAFTS ---
-        msg['X-Unsent'] = '1'
-        
-        # Set the plain text fallback
-        msg.set_content(body)
-        
-        # Convert Markdown (including links) to HTML and attach as the primary view
-        html_body = markdown.markdown(body)
-        # Wrap it in basic HTML tags to ensure Outlook reads it correctly
-        full_html = f"<html><body>{html_body}</body></html>"
-        msg.add_alternative(full_html, subtype='html')
+            # 4. Email Generation
+            logger.info("Generating final email draft...")
+            email_body = (EMAIL_PROMPT | llm).invoke({
+                "seed_emails": load_seed_emails(),
+                "web_data": web_data,
+                "pdf_data": pdf_context,
+                "transcript": transcript
+            })
+            
+            # 5. Clean AI Preambles (The Guillotine)
+            logger.info("Applying formatting cleanup...")
+            match = re.search(r'^(Hi\s|Hello\s|Dear\s|Hey\s|Good\s)', email_body, re.MULTILINE | re.IGNORECASE)
+            if match:
+                email_body = email_body[match.start():]
 
-        for filename in attachments:
-            filepath = os.path.join(ATTACHMENTS_DIR, filename)
-            if os.path.exists(filepath):
-                ctype, encoding = mimetypes.guess_type(filepath)
-                if ctype is None or encoding is not None:
-                    ctype = 'application/octet-stream'
-                maintype, subtype = ctype.split('/', 1)
-                
-                with open(filepath, 'rb') as f:
-                    msg.add_attachment(f.read(), maintype=maintype, subtype=subtype, filename=filename)
-                    print(f"[-] Attached: {filename}")
+            # 6. Package to Outlook
+            logger.info("Packaging .eml file...")
+            package_eml_file(email_body, list(files_to_attach), event.src_path)
 
-        base_name = os.path.basename(source_path).replace('.txt', '')
-        output_file = os.path.join(OUTPUTS_DIR, f"Draft_{base_name}.eml")
-        
-        with open(output_file, 'wb') as f:
-            f.write(bytes(msg))
-        
-        print(f"[+] Success! Ready to send: {output_file}\n")
+        except Exception as e:
+            logger.error(f"Failed to process transcript: {e}", exc_info=True)
+
 
 if __name__ == "__main__":
-    for d in [TRANSCRIPTS_DIR, OUTPUTS_DIR, ATTACHMENTS_DIR]:
-        os.makedirs(d, exist_ok=True)
-
+    setup_directories()
     ingest_pdfs_on_startup()
 
     event_handler = TranscriptHandler()
     observer = PollingObserver()
     observer.schedule(event_handler, path=TRANSCRIPTS_DIR, recursive=False)
     
-    print(f"Watching for transcripts in {TRANSCRIPTS_DIR}...")
+    logger.info(f"Watching for transcripts in {TRANSCRIPTS_DIR}...")
     observer.start()
+    
     try:
         while True:
             time.sleep(1)
