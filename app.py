@@ -1,3 +1,4 @@
+# Watchtower CI/CD Test Successful!
 import os
 import time
 import mimetypes
@@ -206,7 +207,7 @@ class AttachmentHandler(FileSystemEventHandler):
         # Re-run the ingestion function to update ChromaDB with the new file
         logger.info("Rebuilding vector database with new attachments...")
         ingest_pdfs_on_startup()
-        
+
 class TranscriptHandler(FileSystemEventHandler):
     def on_created(self, event):
         if event.is_directory or not event.src_path.endswith('.txt'):
