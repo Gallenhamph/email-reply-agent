@@ -220,24 +220,24 @@ def package_eml_file(body: str, attachments: list, source_path: str):
 
 
 def clean_transcript_with_glossary(text: str) -> str:
-if not os.path.exists(GLOSSARY_FILE):
-    return text
-    
-try:
-    with open(GLOSSARY_FILE, 'r', encoding='utf-8') as f:
-        glossary = yaml.safe_load(f)
+    if not os.path.exists(GLOSSARY_FILE):
+        return text
         
-    if glossary:
-        # Sort keys by length descending to replace longer phrases first
-        for key in sorted(glossary.keys(), key=len, reverse=True):
-            # Regex \b ensures we only replace whole words, not parts of words
-            pattern = re.compile(r'\b' + re.escape(key) + r'\b', re.IGNORECASE)
-            text = pattern.sub(glossary[key], text)
+    try:
+        with open(GLOSSARY_FILE, 'r', encoding='utf-8') as f:
+            glossary = yaml.safe_load(f)
             
-except Exception as e:
-    logger.error(f"Failed to apply glossary: {e}")
-    
-return text
+        if glossary:
+            # Sort keys by length descending to replace longer phrases first
+            for key in sorted(glossary.keys(), key=len, reverse=True):
+                # Regex \b ensures we only replace whole words, not parts of words
+                pattern = re.compile(r'\b' + re.escape(key) + r'\b', re.IGNORECASE)
+                text = pattern.sub(glossary[key], text)
+                
+    except Exception as e:
+        logger.error(f"Failed to apply glossary: {e}")
+        
+    return text
 
 # ==========================================
 # EVENT HANDLER
