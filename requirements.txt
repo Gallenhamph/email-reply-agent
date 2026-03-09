@@ -8,3 +8,4 @@ chromadb
 markdown
 cryptography
 PyYAML
+rank_bm25

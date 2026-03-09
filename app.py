@@ -20,6 +20,8 @@ from langchain_core.documents import Document
 from langchain_community.tools import DuckDuckGoSearchResults
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
+from langchain_community.retrievers import BM25Retriever
+from langchain.retrievers import EnsembleRetriever
 
 # ==========================================
 # CONFIGURATION & SETUP
@@ -46,6 +48,9 @@ search_tool = DuckDuckGoSearchResults()
 
 # Initialize ChromaDB Client
 chroma_client = chromadb.HttpClient(host="chromadb", port=8000)
+
+# Global variable to hold the BM25 Keyword Index
+global_bm25_retriever = None
 
 # ==========================================
 # PROMPT TEMPLATES
@@ -119,15 +124,15 @@ def get_vector_store() -> Chroma:
     return Chroma(client=chroma_client, collection_name="sophos_docs", embedding_function=embeddings)
 
 def ingest_pdfs_on_startup():
-    """Reads PDFs, converts to Markdown, and loads into ChromaDB."""
+    global global_bm25_retriever  # <--- Allow modifying the global variable
+    
     logger.info("Checking for new PDFs in /attachments to index...")
     
-    # Reset collection to prevent duplicate chunks on restart
     try:
         chroma_client.delete_collection("sophos_docs")
         logger.info("Cleared old database collection for fresh ingestion.")
     except Exception:
-        pass # Collection didn't exist yet
+        pass 
 
     vector_store = get_vector_store()
     documents = []
@@ -150,8 +155,14 @@ def ingest_pdfs_on_startup():
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=300)
     splits = text_splitter.split_documents(documents)
     
+    # 1. Build the Dense Vector Database (Chroma)
     vector_store.add_documents(splits)
     logger.info(f"Successfully indexed {len(splits)} Markdown chunks into ChromaDB!")
+    
+    # 2. Build the Sparse Keyword Database (BM25)
+    logger.info("Building BM25 Keyword Index for Hybrid Search...")
+    global_bm25_retriever = BM25Retriever.from_documents(splits)
+    global_bm25_retriever.k = 3  # Tell BM25 to return its top 3 keyword matches
 
 def execute_web_search(topics: str) -> str:
     """Queries DuckDuckGo for live data across specified domains."""
@@ -259,17 +270,27 @@ class TranscriptHandler(FileSystemEventHandler):
             logger.info(f"Searching web for topics: {topics}")
             web_data = execute_web_search(topics)
 
-            # 3. Vector Database Retrieval
-            logger.info("Querying ChromaDB for local PDF context...")
+           # 3. Hybrid Search Retrieval (Vector + Keyword)
+            logger.info("Running Hybrid Search (ChromaDB + BM25) for maximum accuracy...")
             vector_store = get_vector_store()
-            pdf_results = vector_store.similarity_search(topics, k=3)
+            chroma_retriever = vector_store.as_retriever(search_kwargs={"k": 3})
+            
+            if global_bm25_retriever:
+                # Combine both search methods using Reciprocal Rank Fusion
+                ensemble_retriever = EnsembleRetriever(
+                    retrievers=[global_bm25_retriever, chroma_retriever],
+                    weights=[0.5, 0.5] # Balance: 50% exact keyword, 50% semantic concept
+                )
+                pdf_results = ensemble_retriever.invoke(topics)
+            else:
+                # Fallback to pure vector search just in case BM25 isn't initialized
+                pdf_results = chroma_retriever.invoke(topics)
             
             pdf_context = ""
             files_to_attach = set() 
             for doc in pdf_results:
                 pdf_context += f"Source File: {doc.metadata['source']}\nContent: {doc.page_content}\n\n"
                 files_to_attach.add(os.path.basename(doc.metadata['source']))
-
             # 4. Email Generation
             logger.info("Generating final email draft...")
             email_body = (EMAIL_PROMPT | llm).invoke({
