@@ -39,7 +39,7 @@ TRANSCRIPTS_DIR = os.path.join(BASE_DIR, "transcripts")
 OUTPUTS_DIR = os.path.join(BASE_DIR, "outputs")
 ATTACHMENTS_DIR = os.path.join(BASE_DIR, "attachments")
 SEEDS_DIR = os.path.join(BASE_DIR, "seeds")
-GLOSSARY_FILE = os.path.join(BASE_DIR, "glossary.yml") # <--- Add this line
+GLOSSARY_FILE = os.path.join(BASE_DIR, "glossary.yml")
 
 # Initialize Models and Tools
 llm = OllamaLLM(model="llama3.1", base_url=OLLAMA_URL)
@@ -202,14 +202,11 @@ def package_eml_file(body: str, attachments: list, source_path: str):
                 ctype = 'application/octet-stream'
             maintype, subtype = ctype.split('/', 1)
             
-            # FIXED: Aligned with the variables above it
             with open(filepath, 'rb') as f:
                 msg.add_attachment(f.read(), maintype=maintype, subtype=subtype, filename=filename)
                 logger.info(f"Attached document: {filename}")
 
     # --- FILE SAVING BLOCK ---
-    # FIXED: Un-indented completely so it sits completely outside the 'for' loop.
-    # It now runs exactly once per email, regardless of how many attachments there are.
     base_name = os.path.basename(source_path).replace('.txt', '')
     output_file = os.path.join(OUTPUTS_DIR, f"Draft_{base_name}.eml")
     
@@ -263,8 +260,9 @@ class TranscriptHandler(FileSystemEventHandler):
         logger.info(f"New transcript detected: {event.src_path}")
         time.sleep(1) # Ensure file system lock releases
         
-    with open(event.src_path, 'r', encoding='utf-8') as f:
-                raw_transcript = f.read()
+        # FIXED INDENTATION HERE
+        with open(event.src_path, 'r', encoding='utf-8') as f:
+            raw_transcript = f.read()
             
         logger.info("Applying custom glossary corrections to transcript...")
         transcript = clean_transcript_with_glossary(raw_transcript)
@@ -278,7 +276,7 @@ class TranscriptHandler(FileSystemEventHandler):
             logger.info(f"Searching web for topics: {topics}")
             web_data = execute_web_search(topics)
 
-           # 3. Hybrid Search Retrieval (Vector + Keyword)
+            # 3. Hybrid Search Retrieval (Vector + Keyword)
             logger.info("Running Hybrid Search (ChromaDB + BM25) for maximum accuracy...")
             vector_store = get_vector_store()
             chroma_retriever = vector_store.as_retriever(search_kwargs={"k": 3})
@@ -299,6 +297,7 @@ class TranscriptHandler(FileSystemEventHandler):
             for doc in pdf_results:
                 pdf_context += f"Source File: {doc.metadata['source']}\nContent: {doc.page_content}\n\n"
                 files_to_attach.add(os.path.basename(doc.metadata['source']))
+                
             # 4. Email Generation
             logger.info("Generating final email draft...")
             email_body = (EMAIL_PROMPT | llm).invoke({
