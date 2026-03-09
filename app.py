@@ -193,6 +193,7 @@ def package_eml_file(body: str, attachments: list, source_path: str):
     full_html = f"<html><body>{html_body}</body></html>"
     msg.add_alternative(full_html, subtype='html')
 
+    # --- ATTACHMENT LOOP ---
     for filename in attachments:
         filepath = os.path.join(ATTACHMENTS_DIR, filename)
         if os.path.exists(filepath):
@@ -201,10 +202,14 @@ def package_eml_file(body: str, attachments: list, source_path: str):
                 ctype = 'application/octet-stream'
             maintype, subtype = ctype.split('/', 1)
             
-    with open(filepath, 'rb') as f:
-        msg.add_attachment(f.read(), maintype=maintype, subtype=subtype, filename=filename)
-        logger.info(f"Attached document: {filename}")
+            # FIXED: Aligned with the variables above it
+            with open(filepath, 'rb') as f:
+                msg.add_attachment(f.read(), maintype=maintype, subtype=subtype, filename=filename)
+                logger.info(f"Attached document: {filename}")
 
+    # --- FILE SAVING BLOCK ---
+    # FIXED: Un-indented completely so it sits completely outside the 'for' loop.
+    # It now runs exactly once per email, regardless of how many attachments there are.
     base_name = os.path.basename(source_path).replace('.txt', '')
     output_file = os.path.join(OUTPUTS_DIR, f"Draft_{base_name}.eml")
     
@@ -213,8 +218,8 @@ def package_eml_file(body: str, attachments: list, source_path: str):
     
     logger.info(f"Success! Ready to send: {output_file}")
 
-def clean_transcript_with_glossary(text: str) -> str:
 
+def clean_transcript_with_glossary(text: str) -> str:
 if not os.path.exists(GLOSSARY_FILE):
     return text
     
