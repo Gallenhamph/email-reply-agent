@@ -200,7 +200,7 @@ def package_eml_file(body: str, attachments: list, source_path: str):
     logger.info(f"Success! Ready to send: {output_file}")
 
 def clean_transcript_with_glossary(text: str) -> str:
-"""Replaces phonetic errors and acronyms using the glossary.yml file."""
+
 if not os.path.exists(GLOSSARY_FILE):
     return text
     
