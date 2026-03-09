@@ -21,7 +21,7 @@ from langchain_community.tools import DuckDuckGoSearchResults
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 from langchain_community.retrievers import BM25Retriever
-from langchain.retrievers import EnsembleRetriever
+from langchain_community.retrievers import EnsembleRetriever
 
 # ==========================================
 # CONFIGURATION & SETUP
