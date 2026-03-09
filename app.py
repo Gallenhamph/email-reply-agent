@@ -21,7 +21,7 @@ from langchain_community.tools import DuckDuckGoSearchResults
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 from langchain_community.retrievers import BM25Retriever
-from langchain_community.retrievers import EnsembleRetriever
+
 
 # ==========================================
 # CONFIGURATION & SETUP
@@ -282,30 +282,31 @@ class TranscriptHandler(FileSystemEventHandler):
             chroma_retriever = vector_store.as_retriever(search_kwargs={"k": 3})
             
             if global_bm25_retriever:
-                # Combine both search methods using Reciprocal Rank Fusion
-                ensemble_retriever = EnsembleRetriever(
-                    retrievers=[global_bm25_retriever, chroma_retriever],
-                    weights=[0.5, 0.5] # Balance: 50% exact keyword, 50% semantic concept
-                )
-                pdf_results = ensemble_retriever.invoke(topics)
+                # A. Query both engines independently
+                bm25_docs = global_bm25_retriever.invoke(topics)
+                chroma_docs = chroma_retriever.invoke(topics)
+                
+                # B. Native Reciprocal Rank Fusion (RRF) Algorithm
+                fused_scores = {}
+                doc_map = {}
+                
+                for docs in [bm25_docs, chroma_docs]:
+                    for rank, doc in enumerate(docs):
+                        content = doc.page_content
+                        if content not in fused_scores:
+                            fused_scores[content] = 0
+                            doc_map[content] = doc
+                            
+                        # RRF Formula: 1 / (rank + 60)
+                        fused_scores[content] += 1 / (rank + 60)
+                        
+                # C. Sort by highest fused score and grab the top 3
+                sorted_items = sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)
+                pdf_results = [doc_map[content] for content, score in sorted_items][:3]
+                
             else:
                 # Fallback to pure vector search just in case BM25 isn't initialized
                 pdf_results = chroma_retriever.invoke(topics)
-            
-            pdf_context = ""
-            files_to_attach = set() 
-            for doc in pdf_results:
-                pdf_context += f"Source File: {doc.metadata['source']}\nContent: {doc.page_content}\n\n"
-                files_to_attach.add(os.path.basename(doc.metadata['source']))
-                
-            # 4. Email Generation
-            logger.info("Generating final email draft...")
-            email_body = (EMAIL_PROMPT | llm).invoke({
-                "seed_emails": load_seed_emails(),
-                "web_data": web_data,
-                "pdf_data": pdf_context,
-                "transcript": transcript
-            })
             
             # 5. Clean AI Preambles and Extract Attachments (The Guillotine)
             logger.info("Applying formatting cleanup and extracting attachment decisions...")
