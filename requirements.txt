@@ -2,7 +2,8 @@ watchdog
 langchain
 langchain-community
 langchain-ollama
-duckduckgo-search>=5.0.0
+duckduckgo-search
+ddgs
 pymupdf4llm
 chromadb
 markdown
