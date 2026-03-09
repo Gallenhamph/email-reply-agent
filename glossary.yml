@@ -1,0 +1,44 @@
+# ==========================================
+# PHONETIC MISSPELLINGS & TRANSCRIPT ERRORS
+# ==========================================
+sofos: "Sophos"
+sofas: "Sophos"
+secure works: "Secureworks"
+securex: "Secureworks"
+manage thread response: "Managed Detection and Response (MDR)"
+manage threat response: "Managed Detection and Response (MDR)"
+tagis: "Taegis"
+tages: "Taegis"
+tegis: "Taegis"
+intercept ex: "Intercept X"
+intercepx: "Intercept X"
+syncronized security: "Synchronized Security"
+zero trust: "Zero Trust Network Access (ZTNA)"
+zee tee en a: "ZTNA"
+sea sap: "CSAP"
+sim: "SIEM"
+sore: "SOAR"
+
+# ==========================================
+# SOPHOS & SECUREWORKS SPECIFIC EXPANSIONS
+# ==========================================
+# (Expanding acronyms so the AI knows exactly what they are)
+xgs: "Sophos XGS Firewall"
+sfos: "Sophos Firewall OS"
+cwpp: "Cloud Workload Protection (CWPP)"
+cspm: "Cloud Security Posture Management (CSPM)"
+ndr: "Network Detection and Response (NDR)"
+ztn: "Zero Trust Network Access (ZTNA)"
+mtr: "Managed Detection and Response (MDR)" # Sophos renamed MTR to MDR
+
+# ==========================================
+# GENERAL CYBERSECURITY EXPANSIONS
+# ==========================================
+edr: "Endpoint Detection and Response (EDR)"
+xdr: "Extended Detection and Response (XDR)"
+iam: "Identity and Access Management (IAM)"
+mfa: "Multi-Factor Authentication (MFA)"
+ad: "Active Directory"
+av: "Anti-Virus"
+ciso: "Chief Information Security Officer"
+msp: "Managed Service Provider"

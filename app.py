@@ -7,6 +7,7 @@ import re
 import chromadb
 import markdown
 import pymupdf4llm
+import yaml
 from email.message import EmailMessage
 
 from watchdog.observers.polling import PollingObserver
@@ -36,6 +37,7 @@ TRANSCRIPTS_DIR = os.path.join(BASE_DIR, "transcripts")
 OUTPUTS_DIR = os.path.join(BASE_DIR, "outputs")
 ATTACHMENTS_DIR = os.path.join(BASE_DIR, "attachments")
 SEEDS_DIR = os.path.join(BASE_DIR, "seeds")
+GLOSSARY_FILE = os.path.join(BASE_DIR, "glossary.yml") # <--- Add this line
 
 # Initialize Models and Tools
 llm = OllamaLLM(model="llama3.1", base_url=OLLAMA_URL)
@@ -197,6 +199,27 @@ def package_eml_file(body: str, attachments: list, source_path: str):
     
     logger.info(f"Success! Ready to send: {output_file}")
 
+def clean_transcript_with_glossary(text: str) -> str:
+"""Replaces phonetic errors and acronyms using the glossary.yml file."""
+if not os.path.exists(GLOSSARY_FILE):
+    return text
+    
+try:
+    with open(GLOSSARY_FILE, 'r', encoding='utf-8') as f:
+        glossary = yaml.safe_load(f)
+        
+    if glossary:
+        # Sort keys by length descending to replace longer phrases first
+        for key in sorted(glossary.keys(), key=len, reverse=True):
+            # Regex \b ensures we only replace whole words, not parts of words
+            pattern = re.compile(r'\b' + re.escape(key) + r'\b', re.IGNORECASE)
+            text = pattern.sub(glossary[key], text)
+            
+except Exception as e:
+    logger.error(f"Failed to apply glossary: {e}")
+    
+return text
+
 # ==========================================
 # EVENT HANDLER
 # ==========================================
@@ -221,8 +244,11 @@ class TranscriptHandler(FileSystemEventHandler):
         logger.info(f"New transcript detected: {event.src_path}")
         time.sleep(1) # Ensure file system lock releases
         
-        with open(event.src_path, 'r', encoding='utf-8') as f:
-            transcript = f.read()
+    with open(event.src_path, 'r', encoding='utf-8') as f:
+                raw_transcript = f.read()
+            
+        logger.info("Applying custom glossary corrections to transcript...")
+        transcript = clean_transcript_with_glossary(raw_transcript)
 
         try:
             # 1. Topic Extraction
