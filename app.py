@@ -67,22 +67,22 @@ TRANSCRIPT:
 {transcript}
 """)
 
-EMAIL_PROMPT = PromptTemplate.from_template("""
-You are an expert Sales Engineer representing Sophos and Secureworks. Your task is to write a short, punchy follow-up email based on the meeting transcript.
+EEMAIL_PROMPT = PromptTemplate.from_template("""
+You are an expert Sales Engineer representing Sophos and Secureworks. Your task is to write a BRAND NEW, completely original follow-up email based strictly on the facts in the MEETING_TRANSCRIPT.
 
-STRICT RULES:
-1. PERSPECTIVE & PRONOUNS (CRITICAL): You are writing directly TO the customer. You MUST translate third-person meeting notes into direct address (e.g., "you asked"). Use "we/our" when referring to Sophos/Secureworks capabilities.
-2. TRANSCRIPTION CORRECTION (CRITICAL): The meeting transcript contains phonetic errors. Use your expert cybersecurity domain knowledge to automatically correct terms (e.g., "Sofos" -> "Sophos").
-3. BRIEF RECAP: Begin the email with a highly concise summary of the salient business problems discussed.
-4. ACTION ITEMS: Focus strictly on deliverables, open questions, and next steps. 
-5. Do NOT use words like: delve, robust, tailored, seamless, testament, crucial.
-6. Use the LIVE WEB DATA to include accurate public context and hyperlink references.
-7. RELEVANCE CHECK (CRITICAL): Evaluate the LOCAL PDF KNOWLEDGE. If a document is highly relevant to the customer's specific needs, mention you have attached it. If the documents provided are NOT relevant to the conversation, ignore them completely and do NOT mention any attachments.
-8. You MUST adopt the tone and structure of the EXAMPLE EMAILS. Do NOT copy their exact content.
-9. OUTPUT FORMAT: First, output the raw email text starting directly with the greeting. Then, skip a line after your signature and provide a strict list of the exact filenames you decided to attach, formatted like this:
+CRITICAL INSTRUCTIONS:
+1. ORIGINALITY: You must write original content tailored EXACTLY to the customer in the transcript. Do NOT copy the text of the examples. Use the EXAMPLE_EMAILS strictly as a guide for tone, length, and formatting.
+2. PERSPECTIVE: Write directly TO the customer (e.g., "you asked"). Use "we/our" for Sophos/Secureworks capabilities.
+3. TRANSCRIPTION CORRECTION: The transcript contains phonetic errors. Automatically correct terms (e.g., "Sofos" -> "Sophos").
+4. STRUCTURE: 
+   - Briefly recap the specific business problems discussed in the transcript.
+   - List the actionable next steps and deliverables.
+   - Do NOT use words like: delve, robust, tailored, seamless, testament, crucial.
+5. CONTEXT ENRICHMENT: Use the LIVE_WEB_DATA to add accurate public links if relevant.
+6. ATTACHMENT LOGIC: Evaluate the LOCAL_PDF_KNOWLEDGE. If a document directly answers the customer's needs, mention you have attached it. If not, ignore the documents completely.
+7. OUTPUT FORMAT: Output ONLY the email text starting with the greeting. Skip a line after your signature and provide a strict list of the exact filenames you decided to attach:
 ATTACHMENTS: file1.pdf, file2.pdf
-If no documents were relevant, output:
-ATTACHMENTS: NONE
+(If no documents were relevant, output: ATTACHMENTS: NONE)
 
 <EXAMPLE_EMAILS>
 {seed_emails}
@@ -100,7 +100,7 @@ ATTACHMENTS: NONE
 {transcript}
 </MEETING_TRANSCRIPT>
 
-Output the email draft immediately below this line, starting with the greeting:
+Now, write the custom email for the customer specifically discussed in the transcript:
 """)
 
 # ==========================================
