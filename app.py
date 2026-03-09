@@ -72,14 +72,17 @@ You are an expert Sales Engineer representing Sophos and Secureworks. Your task 
 
 STRICT RULES:
 1. PERSPECTIVE & PRONOUNS (CRITICAL): You are writing directly TO the customer. You MUST translate third-person meeting notes into direct address (e.g., "you asked"). Use "we/our" when referring to Sophos/Secureworks capabilities.
-2. TRANSCRIPTION CORRECTION (CRITICAL): The meeting transcript is from a voice-to-text tool and contains phonetic errors, misheard terms, and missing context. Use your expert cybersecurity domain knowledge to automatically correct terms (e.g., "Sofos" -> "Sophos") and intelligently fill in any blanks to make the technology references accurate and professional.
-3. BRIEF RECAP: Begin the email with a highly concise (1 to 2 sentences max) summary of the salient business problems or goals discussed.
-4. ACTION ITEMS: After the brief recap, focus strictly on deliverables, open questions, and next steps. 
-5. Do NOT use words like: delve, robust, tailored, seamless, testament, crucial, or "I hope this email finds you well."
-6. Use the LIVE WEB DATA to include accurate public context and hyperlink references using Markdown.
-7. Mention that you have attached any relevant documents identified in the LOCAL PDF KNOWLEDGE.
+2. TRANSCRIPTION CORRECTION (CRITICAL): The meeting transcript contains phonetic errors. Use your expert cybersecurity domain knowledge to automatically correct terms (e.g., "Sofos" -> "Sophos").
+3. BRIEF RECAP: Begin the email with a highly concise summary of the salient business problems discussed.
+4. ACTION ITEMS: Focus strictly on deliverables, open questions, and next steps. 
+5. Do NOT use words like: delve, robust, tailored, seamless, testament, crucial.
+6. Use the LIVE WEB DATA to include accurate public context and hyperlink references.
+7. RELEVANCE CHECK (CRITICAL): Evaluate the LOCAL PDF KNOWLEDGE. If a document is highly relevant to the customer's specific needs, mention you have attached it. If the documents provided are NOT relevant to the conversation, ignore them completely and do NOT mention any attachments.
 8. You MUST adopt the tone and structure of the EXAMPLE EMAILS. Do NOT copy their exact content.
-9. OUTPUT FORMAT: You must output ONLY the raw email text. Start directly with the greeting.
+9. OUTPUT FORMAT: First, output the raw email text starting directly with the greeting. Then, skip a line after your signature and provide a strict list of the exact filenames you decided to attach, formatted like this:
+ATTACHMENTS: file1.pdf, file2.pdf
+If no documents were relevant, output:
+ATTACHMENTS: NONE
 
 <EXAMPLE_EMAILS>
 {seed_emails}
@@ -198,9 +201,9 @@ def package_eml_file(body: str, attachments: list, source_path: str):
                 ctype = 'application/octet-stream'
             maintype, subtype = ctype.split('/', 1)
             
-            with open(filepath, 'rb') as f:
-                msg.add_attachment(f.read(), maintype=maintype, subtype=subtype, filename=filename)
-                logger.info(f"Attached document: {filename}")
+    with open(filepath, 'rb') as f:
+        msg.add_attachment(f.read(), maintype=maintype, subtype=subtype, filename=filename)
+        logger.info(f"Attached document: {filename}")
 
     base_name = os.path.basename(source_path).replace('.txt', '')
     output_file = os.path.join(OUTPUTS_DIR, f"Draft_{base_name}.eml")
@@ -300,15 +303,32 @@ class TranscriptHandler(FileSystemEventHandler):
                 "transcript": transcript
             })
             
-            # 5. Clean AI Preambles (The Guillotine)
-            logger.info("Applying formatting cleanup...")
+            # 5. Clean AI Preambles and Extract Attachments (The Guillotine)
+            logger.info("Applying formatting cleanup and extracting attachment decisions...")
+            
+            # A. Parse the LLM's attachment decisions
+            final_attachments = []
+            attach_match = re.search(r'ATTACHMENTS:\s*(.+)', email_body, re.IGNORECASE)
+            
+            if attach_match:
+                attach_str = attach_match.group(1).strip()
+                if "NONE" not in attach_str.upper():
+                    # Check which of the retrieved files the LLM actually approved
+                    for file in files_to_attach:
+                        if file in attach_str:
+                            final_attachments.append(file)
+                
+                # Chop the secret tag off the bottom of the email
+                email_body = email_body[:attach_match.start()].strip()
+
+            # B. Clean any introductory preambles off the top
             match = re.search(r'^(Hi\s|Hello\s|Dear\s|Hey\s|Good\s)', email_body, re.MULTILINE | re.IGNORECASE)
             if match:
                 email_body = email_body[match.start():]
 
             # 6. Package to Outlook
-            logger.info("Packaging .eml file...")
-            package_eml_file(email_body, list(files_to_attach), event.src_path)
+            logger.info(f"Packaging .eml file with {len(final_attachments)} approved attachments...")
+            package_eml_file(email_body, final_attachments, event.src_path)
 
         except Exception as e:
             logger.error(f"Failed to process transcript: {e}", exc_info=True)
