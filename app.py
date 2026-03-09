@@ -1,4 +1,3 @@
-# Watchtower CI/CD Test Successful!
 import os
 import time
 import mimetypes
@@ -21,7 +20,6 @@ from langchain_community.tools import DuckDuckGoSearchResults
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 from langchain_community.retrievers import BM25Retriever
-
 
 # ==========================================
 # CONFIGURATION & SETUP
@@ -67,7 +65,7 @@ TRANSCRIPT:
 {transcript}
 """)
 
-EEMAIL_PROMPT = PromptTemplate.from_template("""
+EMAIL_PROMPT = PromptTemplate.from_template("""
 You are an expert Sales Engineer representing Sophos and Secureworks. Your task is to write a BRAND NEW, completely original follow-up email based strictly on the facts in the MEETING_TRANSCRIPT.
 
 CRITICAL INSTRUCTIONS:
@@ -114,11 +112,12 @@ def setup_directories():
 def load_seed_emails() -> str:
     """Dynamically load few-shot examples from the seeds directory."""
     seeds_text = ""
-    for filename in os.listdir(SEEDS_DIR):
-        if filename.endswith(".txt"):
-            filepath = os.path.join(SEEDS_DIR, filename)
-            with open(filepath, 'r', encoding='utf-8') as f:
-                seeds_text += f"--- Example: {filename} ---\n{f.read().strip()}\n\n"
+    if os.path.exists(SEEDS_DIR):
+        for filename in os.listdir(SEEDS_DIR):
+            if filename.endswith(".txt"):
+                filepath = os.path.join(SEEDS_DIR, filename)
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    seeds_text += f"--- Example: {filename} ---\n{f.read().strip()}\n\n"
                 
     return seeds_text or "No seed examples provided. Please use a professional, concise Sales Engineer tone."
 
@@ -127,7 +126,7 @@ def get_vector_store() -> Chroma:
     return Chroma(client=chroma_client, collection_name="sophos_docs", embedding_function=embeddings)
 
 def ingest_pdfs_on_startup():
-    global global_bm25_retriever  # <--- Allow modifying the global variable
+    global global_bm25_retriever
     
     logger.info("Checking for new PDFs in /attachments to index...")
     
@@ -140,16 +139,17 @@ def ingest_pdfs_on_startup():
     vector_store = get_vector_store()
     documents = []
     
-    for filename in os.listdir(ATTACHMENTS_DIR):
-        if filename.lower().endswith(".pdf"):
-            file_path = os.path.join(ATTACHMENTS_DIR, filename)
-            logger.info(f"Parsing {filename} into Markdown...")
-            try:
-                md_text = pymupdf4llm.to_markdown(file_path)
-                doc = Document(page_content=md_text, metadata={"source": file_path})
-                documents.append(doc)
-            except Exception as e:
-                logger.error(f"Failed to parse {filename}: {e}")
+    if os.path.exists(ATTACHMENTS_DIR):
+        for filename in os.listdir(ATTACHMENTS_DIR):
+            if filename.lower().endswith(".pdf"):
+                file_path = os.path.join(ATTACHMENTS_DIR, filename)
+                logger.info(f"Parsing {filename} into Markdown...")
+                try:
+                    md_text = pymupdf4llm.to_markdown(file_path)
+                    doc = Document(page_content=md_text, metadata={"source": file_path})
+                    documents.append(doc)
+                except Exception as e:
+                    logger.error(f"Failed to parse {filename}: {e}")
 
     if not documents:
         logger.info("No PDFs found or parsed. Skipping database insertion.")
@@ -165,14 +165,21 @@ def ingest_pdfs_on_startup():
     # 2. Build the Sparse Keyword Database (BM25)
     logger.info("Building BM25 Keyword Index for Hybrid Search...")
     global_bm25_retriever = BM25Retriever.from_documents(splits)
-    global_bm25_retriever.k = 3  # Tell BM25 to return its top 3 keyword matches
+    global_bm25_retriever.k = 3
 
 def execute_web_search(topics: str) -> str:
     """Queries DuckDuckGo for live data across specified domains."""
+    
+    # Truncate to top 3 terms to avoid crashing DDG
+    top_topics_list = [t.strip() for t in topics.split(',')]
+    clean_topics = " ".join(top_topics_list[:3])
+    
+    logger.info(f"Truncated search query to top terms: {clean_topics}")
+    
     web_results = ""
     for domain in ["sophos.com", "secureworks.com"]:
         try:
-            res = search_tool.run(f"site:{domain} {topics}")
+            res = search_tool.run(f"site:{domain} {clean_topics}")
             web_results += f"{domain.upper()} RESULTS:\n{res}\n\n"
         except Exception as e:
             logger.warning(f"Search failed for {domain}: {e}")
@@ -193,7 +200,6 @@ def package_eml_file(body: str, attachments: list, source_path: str):
     full_html = f"<html><body>{html_body}</body></html>"
     msg.add_alternative(full_html, subtype='html')
 
-    # --- ATTACHMENT LOOP ---
     for filename in attachments:
         filepath = os.path.join(ATTACHMENTS_DIR, filename)
         if os.path.exists(filepath):
@@ -206,7 +212,6 @@ def package_eml_file(body: str, attachments: list, source_path: str):
                 msg.add_attachment(f.read(), maintype=maintype, subtype=subtype, filename=filename)
                 logger.info(f"Attached document: {filename}")
 
-    # --- FILE SAVING BLOCK ---
     base_name = os.path.basename(source_path).replace('.txt', '')
     output_file = os.path.join(OUTPUTS_DIR, f"Draft_{base_name}.eml")
     
@@ -225,9 +230,7 @@ def clean_transcript_with_glossary(text: str) -> str:
             glossary = yaml.safe_load(f)
             
         if glossary:
-            # Sort keys by length descending to replace longer phrases first
             for key in sorted(glossary.keys(), key=len, reverse=True):
-                # Regex \b ensures we only replace whole words, not parts of words
                 pattern = re.compile(r'\b' + re.escape(key) + r'\b', re.IGNORECASE)
                 text = pattern.sub(glossary[key], text)
                 
@@ -237,10 +240,9 @@ def clean_transcript_with_glossary(text: str) -> str:
     return text
 
 # ==========================================
-# EVENT HANDLER
+# EVENT HANDLERS (With Debounce)
 # ==========================================
 
-# Global state for debouncing duplicate macOS file events
 processed_files = {}
 DEBOUNCE_SECONDS = 15
 
@@ -249,14 +251,13 @@ class AttachmentHandler(FileSystemEventHandler):
         if event.is_directory or not event.src_path.lower().endswith('.pdf'):
             return
             
-        # --- DEBOUNCE LOGIC ---
         current_time = time.time()
         if current_time - processed_files.get(event.src_path, 0) < DEBOUNCE_SECONDS:
-            return # Ignore duplicate macOS events
+            return
         processed_files[event.src_path] = current_time
         
         logger.info(f"New PDF detected: {event.src_path}")
-        time.sleep(2) # Give the OS time to finish writing the file bytes
+        time.sleep(2)
         
         logger.info("Rebuilding vector database with new attachments...")
         ingest_pdfs_on_startup()
@@ -267,14 +268,13 @@ class TranscriptHandler(FileSystemEventHandler):
         if event.is_directory or not event.src_path.endswith('.txt'):
             return
             
-        # --- DEBOUNCE LOGIC ---
         current_time = time.time()
         if current_time - processed_files.get(event.src_path, 0) < DEBOUNCE_SECONDS:
-            return # Ignore duplicate macOS events
+            return 
         processed_files[event.src_path] = current_time
         
         logger.info(f"New transcript detected: {event.src_path}")
-        time.sleep(1) # Ensure file system lock releases
+        time.sleep(1) 
         
         with open(event.src_path, 'r', encoding='utf-8') as f:
             raw_transcript = f.read()
@@ -291,17 +291,15 @@ class TranscriptHandler(FileSystemEventHandler):
             logger.info(f"Searching web for topics: {topics}")
             web_data = execute_web_search(topics)
 
-            # 3. Hybrid Search Retrieval (Vector + Keyword)
+            # 3. Native Hybrid Search (ChromaDB + BM25)
             logger.info("Running Native Hybrid Search (ChromaDB + BM25)...")
             vector_store = get_vector_store()
             chroma_retriever = vector_store.as_retriever(search_kwargs={"k": 3})
             
             if global_bm25_retriever:
-                # A. Query both engines independently
                 bm25_docs = global_bm25_retriever.invoke(topics)
                 chroma_docs = chroma_retriever.invoke(topics)
                 
-                # B. Native Reciprocal Rank Fusion (RRF) Algorithm
                 fused_scores = {}
                 doc_map = {}
                 
@@ -313,7 +311,6 @@ class TranscriptHandler(FileSystemEventHandler):
                             doc_map[content] = doc
                         fused_scores[content] += 1 / (rank + 60)
                         
-                # C. Sort by highest fused score and grab the top 3
                 sorted_items = sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)
                 pdf_results = [doc_map[content] for content, score in sorted_items][:3]
                 
@@ -360,16 +357,15 @@ class TranscriptHandler(FileSystemEventHandler):
         except Exception as e:
             logger.error(f"Failed to process transcript: {e}", exc_info=True)
 
+
 if __name__ == "__main__":
     setup_directories()
     ingest_pdfs_on_startup()
 
-    # 1. Start watching Transcripts
     transcript_handler = TranscriptHandler()
     transcript_observer = PollingObserver()
     transcript_observer.schedule(transcript_handler, path=TRANSCRIPTS_DIR, recursive=False)
     
-    # 2. Start watching Attachments
     attachment_handler = AttachmentHandler()
     attachment_observer = PollingObserver()
     attachment_observer.schedule(attachment_handler, path=ATTACHMENTS_DIR, recursive=False)
