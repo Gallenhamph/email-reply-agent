@@ -239,28 +239,43 @@ def clean_transcript_with_glossary(text: str) -> str:
 # ==========================================
 # EVENT HANDLER
 # ==========================================
+
+# Global state for debouncing duplicate macOS file events
+processed_files = {}
+DEBOUNCE_SECONDS = 15
+
 class AttachmentHandler(FileSystemEventHandler):
     def on_created(self, event):
-        # Ignore directories and non-PDF files
         if event.is_directory or not event.src_path.lower().endswith('.pdf'):
             return
+            
+        # --- DEBOUNCE LOGIC ---
+        current_time = time.time()
+        if current_time - processed_files.get(event.src_path, 0) < DEBOUNCE_SECONDS:
+            return # Ignore duplicate macOS events
+        processed_files[event.src_path] = current_time
         
         logger.info(f"New PDF detected: {event.src_path}")
-        time.sleep(2) # Give macOS a second to finish copying the large file
+        time.sleep(2) # Give the OS time to finish writing the file bytes
         
-        # Re-run the ingestion function to update ChromaDB with the new file
         logger.info("Rebuilding vector database with new attachments...")
         ingest_pdfs_on_startup()
+
 
 class TranscriptHandler(FileSystemEventHandler):
     def on_created(self, event):
         if event.is_directory or not event.src_path.endswith('.txt'):
             return
+            
+        # --- DEBOUNCE LOGIC ---
+        current_time = time.time()
+        if current_time - processed_files.get(event.src_path, 0) < DEBOUNCE_SECONDS:
+            return # Ignore duplicate macOS events
+        processed_files[event.src_path] = current_time
         
         logger.info(f"New transcript detected: {event.src_path}")
         time.sleep(1) # Ensure file system lock releases
         
-        # FIXED INDENTATION HERE
         with open(event.src_path, 'r', encoding='utf-8') as f:
             raw_transcript = f.read()
             
@@ -277,7 +292,7 @@ class TranscriptHandler(FileSystemEventHandler):
             web_data = execute_web_search(topics)
 
             # 3. Hybrid Search Retrieval (Vector + Keyword)
-            logger.info("Running Hybrid Search (ChromaDB + BM25) for maximum accuracy...")
+            logger.info("Running Native Hybrid Search (ChromaDB + BM25)...")
             vector_store = get_vector_store()
             chroma_retriever = vector_store.as_retriever(search_kwargs={"k": 3})
             
@@ -296,8 +311,6 @@ class TranscriptHandler(FileSystemEventHandler):
                         if content not in fused_scores:
                             fused_scores[content] = 0
                             doc_map[content] = doc
-                            
-                        # RRF Formula: 1 / (rank + 60)
                         fused_scores[content] += 1 / (rank + 60)
                         
                 # C. Sort by highest fused score and grab the top 3
@@ -305,28 +318,37 @@ class TranscriptHandler(FileSystemEventHandler):
                 pdf_results = [doc_map[content] for content, score in sorted_items][:3]
                 
             else:
-                # Fallback to pure vector search just in case BM25 isn't initialized
                 pdf_results = chroma_retriever.invoke(topics)
             
-            # 5. Clean AI Preambles and Extract Attachments (The Guillotine)
+            pdf_context = ""
+            files_to_attach = set() 
+            for doc in pdf_results:
+                pdf_context += f"Source File: {doc.metadata['source']}\nContent: {doc.page_content}\n\n"
+                files_to_attach.add(os.path.basename(doc.metadata['source']))
+                
+            # 4. Email Generation
+            logger.info("Generating final email draft...")
+            email_body = (EMAIL_PROMPT | llm).invoke({
+                "seed_emails": load_seed_emails(),
+                "web_data": web_data,
+                "pdf_data": pdf_context,
+                "transcript": transcript
+            })
+            
+            # 5. Clean AI Preambles and Extract Attachments
             logger.info("Applying formatting cleanup and extracting attachment decisions...")
             
-            # A. Parse the LLM's attachment decisions
             final_attachments = []
             attach_match = re.search(r'ATTACHMENTS:\s*(.+)', email_body, re.IGNORECASE)
             
             if attach_match:
                 attach_str = attach_match.group(1).strip()
                 if "NONE" not in attach_str.upper():
-                    # Check which of the retrieved files the LLM actually approved
                     for file in files_to_attach:
                         if file in attach_str:
                             final_attachments.append(file)
-                
-                # Chop the secret tag off the bottom of the email
                 email_body = email_body[:attach_match.start()].strip()
 
-            # B. Clean any introductory preambles off the top
             match = re.search(r'^(Hi\s|Hello\s|Dear\s|Hey\s|Good\s)', email_body, re.MULTILINE | re.IGNORECASE)
             if match:
                 email_body = email_body[match.start():]
@@ -337,7 +359,6 @@ class TranscriptHandler(FileSystemEventHandler):
 
         except Exception as e:
             logger.error(f"Failed to process transcript: {e}", exc_info=True)
-
 
 if __name__ == "__main__":
     setup_directories()
