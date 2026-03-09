@@ -18,27 +18,45 @@ zee tee en a: "ZTNA"
 sea sap: "CSAP"
 sim: "SIEM"
 sore: "SOAR"
+sass e: "SASE"
+sassy: "SASE"
+sock: "Security Operations Center (SOC)"
+eye oh see: "Indicator of Compromise (IOC)"
+miter attack: "MITRE ATT&CK"
+might er: "MITRE"
 
 # ==========================================
 # SOPHOS & SECUREWORKS SPECIFIC EXPANSIONS
 # ==========================================
-# (Expanding acronyms so the AI knows exactly what they are)
 xgs: "Sophos XGS Firewall"
 sfos: "Sophos Firewall OS"
-cwpp: "Cloud Workload Protection (CWPP)"
-cspm: "Cloud Security Posture Management (CSPM)"
-ndr: "Network Detection and Response (NDR)"
-ztn: "Zero Trust Network Access (ZTNA)"
-mtr: "Managed Detection and Response (MDR)" # Sophos renamed MTR to MDR
+central: "Sophos Central"
+x ops: "Sophos X-Ops"
+xops: "Sophos X-Ops"
+cloud optix: "Sophos Cloud Optix"
+phish threat: "Sophos Phish Threat"
+ndr: "Sophos Network Detection and Response (NDR)"
+ztn: "Sophos Zero Trust Network Access (ZTNA)"
+mtr: "Managed Detection and Response (MDR)" 
 
 # ==========================================
 # GENERAL CYBERSECURITY EXPANSIONS
 # ==========================================
 edr: "Endpoint Detection and Response (EDR)"
 xdr: "Extended Detection and Response (XDR)"
+sase: "Secure Access Service Edge (SASE)"
+sse: "Security Service Edge (SSE)"
+casb: "Cloud Access Security Broker (CASB)"
+dlp: "Data Loss Prevention (DLP)"
 iam: "Identity and Access Management (IAM)"
 mfa: "Multi-Factor Authentication (MFA)"
 ad: "Active Directory"
 av: "Anti-Virus"
 ciso: "Chief Information Security Officer"
 msp: "Managed Service Provider"
+cve: "Common Vulnerabilities and Exposures (CVE)"
+bec: "Business Email Compromise (BEC)"
+ioc: "Indicator of Compromise (IOC)"
+ioa: "Indicator of Attack (IOA)"
+dast: "Dynamic Application Security Testing (DAST)"
+sast: "Static Application Security Testing (SAST)"
