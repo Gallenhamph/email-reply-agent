@@ -7,7 +7,10 @@ import chromadb
 import markdown
 import pymupdf4llm
 import yaml
+import email
+from email import policy
 from email.message import EmailMessage
+
 
 from watchdog.observers.polling import PollingObserver
 from watchdog.events import FileSystemEventHandler
@@ -113,14 +116,64 @@ def setup_directories():
     for d in [Config.TRANSCRIPTS_DIR, Config.OUTPUTS_DIR, Config.ATTACHMENTS_DIR, Config.SEEDS_DIR]:
         os.makedirs(d, exist_ok=True)
 
+def cleanup_old_transcripts(days_to_keep=7):
+    """Sweeps the transcripts folder and deletes files older than the specified days."""
+    now = time.time()
+    cutoff_time = now - (days_to_keep * 86400) # 86400 seconds in a day
+    
+    if os.path.exists(Config.TRANSCRIPTS_DIR):
+        for filename in os.listdir(Config.TRANSCRIPTS_DIR):
+            if filename.endswith(".processed") or filename.endswith(".error"):
+                filepath = os.path.join(Config.TRANSCRIPTS_DIR, filename)
+                try:
+                    file_mtime = os.path.getmtime(filepath)
+                    if file_mtime < cutoff_time:
+                        os.remove(filepath)
+                        logger.info(f"Routine Cleanup: Deleted old transcript {filename}")
+                except Exception as e:
+                    logger.warning(f"Cleanup failed for {filename}: {e}")
+
 def load_seed_emails() -> str:
+    """Dynamically load few-shot examples from both .txt and .eml files in the seeds directory."""
     seeds_text = ""
     if os.path.exists(Config.SEEDS_DIR):
         for filename in os.listdir(Config.SEEDS_DIR):
-            if filename.endswith(".txt"):
-                filepath = os.path.join(Config.SEEDS_DIR, filename)
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    seeds_text += f"--- Example: {filename} ---\n{f.read().strip()}\n\n"
+            filepath = os.path.join(Config.SEEDS_DIR, filename)
+            
+            # Handle legacy .txt seeds
+            if filename.lower().endswith(".txt"):
+                try:
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        seeds_text += f"--- Example: {filename} ---\n{f.read().strip()}\n\n"
+                except Exception as e:
+                    logger.warning(f"Failed to read text seed {filename}: {e}")
+                    
+            # Handle new .eml seeds directly from Outlook
+            elif filename.lower().endswith(".eml"):
+                try:
+                    with open(filepath, 'rb') as f:
+                        msg = email.message_from_binary_file(f, policy=policy.default)
+                        
+                        # Try to grab the plain text version of the email first
+                        text_part = msg.get_body(preferencelist=('plain',))
+                        
+                        if text_part:
+                            body = text_part.get_content()
+                        else:
+                            # Fallback: If it's HTML only, strip the tags out
+                            html_part = msg.get_body(preferencelist=('html',))
+                            if html_part:
+                                raw_html = html_part.get_content()
+                                body = re.sub(r'<[^>]+>', '', raw_html) # Basic HTML stripping
+                            else:
+                                body = ""
+                                
+                        if body.strip():
+                            seeds_text += f"--- Example: {filename} ---\n{body.strip()}\n\n"
+                            
+                except Exception as e:
+                    logger.warning(f"Failed to parse .eml seed {filename}: {e}")
+                    
     return seeds_text or "No seed examples provided. Please use a professional, concise Sales Engineer tone."
 
 def get_vector_store() -> Chroma:
@@ -304,8 +357,17 @@ def process_transcript(file_path: str):
         logger.info(f"Packaging .eml file with {len(final_attachments)} approved attachments...")
         package_eml_file(email_body, final_attachments, file_path)
 
+        # --- NEW: STOP THE INFINITE LOOP ---
+        processed_path = file_path + ".processed"
+        os.rename(file_path, processed_path)
+        logger.info(f"Success! Archived transcript to prevent reprocessing: {os.path.basename(processed_path)}")
+
     except Exception as e:
         logger.error(f"Failed to process transcript: {e}", exc_info=True)
+        # Prevent infinite crash loops by renaming bad files
+        error_path = file_path + ".error"
+        if os.path.exists(file_path):
+            os.rename(file_path, error_path)
 
 # ==========================================
 # EVENT HANDLERS
@@ -343,6 +405,11 @@ class TranscriptHandler(DebouncedEventHandler):
             return 
             
         logger.info(f"New transcript detected: {event.src_path}")
+        
+        # --- NEW: Run the 7-day cleanup sweep ---
+        logger.info("Running routine cleanup of old files...")
+        cleanup_old_transcripts(days_to_keep=7)
+        
         time.sleep(1) 
         process_transcript(event.src_path)
 
