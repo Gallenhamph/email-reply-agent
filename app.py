@@ -84,6 +84,7 @@ You are {se_name}, an expert Cybersecurity Sales Engineer at {se_company}. Your 
 3. TRANSCRIPTION CORRECTION: The notes contain phonetic errors. Automatically correct industry terms.
 4. DIRECT ADDRESS: Write directly to the customer (e.g., "Great speaking with you...").
 5. ATTACHMENTS: At the bottom of the email, list the exact filenames of any highly relevant PDFs from the <PDF_KNOWLEDGE> section in this format: ATTACHMENTS: file1.pdf, file2.pdf (If none are relevant, output ATTACHMENTS: NONE).
+6. PRISTINE FORMATTING: You must use perfect Markdown formatting for readability. ALWAYS leave a blank empty line before starting a bulleted list. Use standard bullets (`* ` or `- `) and ensure proper spacing and indentation.
 </CRITICAL_RULES>
 
 <STYLE_EXAMPLES>
@@ -191,7 +192,7 @@ def package_eml_file(body: str, attachments: list, source_path: str):
     msg['X-Unsent'] = '1'
     
     msg.set_content(body)
-    html_body = markdown.markdown(body)
+    html_body = markdown.markdown(body, extensions=['sane_lists', 'nl2br'])
     full_html = f"<html><body>{html_body}</body></html>"
     msg.add_alternative(full_html, subtype='html')
 
