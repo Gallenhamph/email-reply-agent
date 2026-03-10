@@ -7,7 +7,7 @@ services:
     restart: unless-stopped
     environment:
       # --- USER CONFIGURATION ---
-      - SE_NAME= #<------ Change THIS!!!
+      - SE_NAME=Bradley Collis #<------ Change THIS!!!
       - SE_COMPANY=Sophos and Secureworks
       # --------------------------
       - OLLAMA_URL=http://host.docker.internal:11434

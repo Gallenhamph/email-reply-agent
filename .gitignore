@@ -17,6 +17,7 @@ outputs/*
 attachments/*
 seeds/*
 
+
 # Keep the directories themselves in the repo, just not their contents
 !transcripts/.gitkeep
 !outputs/.gitkeep
