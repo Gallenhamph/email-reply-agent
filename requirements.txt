@@ -2,7 +2,7 @@ watchdog
 langchain
 langchain-community
 langchain-ollama
-langchain-chroma   <--- ADD THIS LINE
+langchain-chroma
 duckduckgo-search
 ddgs
 pymupdf4llm

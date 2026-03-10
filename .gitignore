@@ -16,6 +16,7 @@ transcripts/*
 outputs/*
 attachments/*
 seeds/*
+docker-compose.yaml
 
 
 # Keep the directories themselves in the repo, just not their contents
