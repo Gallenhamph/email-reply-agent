@@ -31,103 +31,100 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://host.docker.internal:11434")
-BASE_DIR = "/app"
-TRANSCRIPTS_DIR = os.path.join(BASE_DIR, "transcripts")
-OUTPUTS_DIR = os.path.join(BASE_DIR, "outputs")
-ATTACHMENTS_DIR = os.path.join(BASE_DIR, "attachments")
-SEEDS_DIR = os.path.join(BASE_DIR, "seeds")
-GLOSSARY_FILE = os.path.join(BASE_DIR, "glossary.yml")
+class Config:
+    OLLAMA_URL = os.getenv("OLLAMA_URL", "http://host.docker.internal:11434")
+    BASE_DIR = "/app"
+    TRANSCRIPTS_DIR = os.path.join(BASE_DIR, "transcripts")
+    OUTPUTS_DIR = os.path.join(BASE_DIR, "outputs")
+    ATTACHMENTS_DIR = os.path.join(BASE_DIR, "attachments")
+    SEEDS_DIR = os.path.join(BASE_DIR, "seeds")
+    GLOSSARY_FILE = os.path.join(BASE_DIR, "glossary.yml")
+    DEBOUNCE_SECONDS = 15
 
-# Initialize Models and Tools
-llm = OllamaLLM(model="llama3.1", base_url=OLLAMA_URL)
-embeddings = OllamaEmbeddings(model="nomic-embed-text", base_url=OLLAMA_URL)
+# Initialize Models and Tools (Mistral Small Upgrade)
+llm = OllamaLLM(
+    model="mistral-small", 
+    base_url=Config.OLLAMA_URL,
+    num_ctx=32000,   # Unlocks the brain for 90-minute transcripts
+    keep_alive="0"   # Instantly dumps the 14GB model from RAM when finished
+)
+
+embeddings = OllamaEmbeddings(model="nomic-embed-text", base_url=Config.OLLAMA_URL)
 search_tool = DuckDuckGoSearchResults()
-
-# Initialize ChromaDB Client
 chroma_client = chromadb.HttpClient(host="chromadb", port=8000)
 
 # Global variable to hold the BM25 Keyword Index
 global_bm25_retriever = None
 
 # ==========================================
-# PROMPT TEMPLATES
+# PROMPT TEMPLATES (Unlocked for Nuance)
 # ==========================================
 
 EXTRACTION_PROMPT = PromptTemplate.from_template("""
-You are an expert cybersecurity architect. Read the following raw voice-to-text meeting transcript and identify the primary cybersecurity products, tools, or services discussed. 
+You are an expert cybersecurity architect. Read the following raw voice-to-text meeting transcript.
+Your goal is to identify the single most critical Sophos or Secureworks product discussed that requires follow-up research.
 
-CRITICAL RULE: The transcript contains phonetic spelling errors, misheard words, and broken acronyms (e.g., "Sofos" instead of "Sophos", "manage thread response" instead of "MDR", "secure works" instead of "Secureworks"). You MUST correct these to their proper industry names.
+CRITICAL RULE: Correct any phonetic spelling errors (e.g., "Sofos" -> "Sophos").
 
-Return ONLY a comma-separated list of the properly spelled product names. Do not write a sentence. If none are found, return "Sophos and Secureworks".
-
+Return ONLY the name of the top 1 or 2 products, separated by a comma. Keep it incredibly brief (e.g., "Sophos MDR, Microsoft Intune"). Do not write a sentence.
 TRANSCRIPT:
 {transcript}
 """)
 
 EMAIL_PROMPT = PromptTemplate.from_template("""
-You are an expert Sales Engineer representing Sophos and Secureworks. Your task is to write a BRAND NEW, completely original follow-up email based strictly on the facts in the MEETING_TRANSCRIPT.
+You are an expert Cybersecurity Sales Engineer. Your ONLY job is to write a brand new follow-up email to a customer based strictly on the MEETING_NOTES provided below.
 
-CRITICAL INSTRUCTIONS:
-1. ORIGINALITY: You must write original content tailored EXACTLY to the customer in the transcript. Do NOT copy the text of the examples. Use the EXAMPLE_EMAILS strictly as a guide for tone, length, and formatting.
-2. PERSPECTIVE: Write directly TO the customer (e.g., "you asked"). Use "we/our" for Sophos/Secureworks capabilities.
-3. TRANSCRIPTION CORRECTION: The transcript contains phonetic errors. Automatically correct terms (e.g., "Sofos" -> "Sophos").
-4. STRUCTURE: 
-   - Briefly recap the specific business problems discussed in the transcript.
-   - List the actionable next steps and deliverables.
-   - Do NOT use words like: delve, robust, tailored, seamless, testament, crucial.
-5. CONTEXT ENRICHMENT: Use the LIVE_WEB_DATA to add accurate public links if relevant.
-6. ATTACHMENT LOGIC: Evaluate the LOCAL_PDF_KNOWLEDGE. If a document directly answers the customer's needs, mention you have attached it. If not, ignore the documents completely.
-7. OUTPUT FORMAT: Output ONLY the email text starting with the greeting. Skip a line after your signature and provide a strict list of the exact filenames you decided to attach:
-ATTACHMENTS: file1.pdf, file2.pdf
-(If no documents were relevant, output: ATTACHMENTS: NONE)
+<CRITICAL_RULES>
+1. FACTUAL ACCURACY: Base your business recap and action items strictly on the <MEETING_NOTES>. Do not invent deliverables.
+2. STYLE TRANSFER: Analyze the <STYLE_EXAMPLES> to understand the author's tone, sentence length, and formatting preferences. Write your brand new email using this exact persona.
+3. TRANSCRIPTION CORRECTION: The notes contain phonetic errors. Automatically correct industry terms (e.g., "Sofos" -> "Sophos", "manage thread response" -> "MDR").
+4. DIRECT ADDRESS: Write directly to the customer (e.g., "Great speaking with you...").
+5. ATTACHMENTS: At the bottom of the email, list the exact filenames of any highly relevant PDFs from the <PDF_KNOWLEDGE> section in this format: ATTACHMENTS: file1.pdf, file2.pdf (If none are relevant, output ATTACHMENTS: NONE).
+</CRITICAL_RULES>
 
-<EXAMPLE_EMAILS>
+<STYLE_EXAMPLES>
 {seed_emails}
-</EXAMPLE_EMAILS>
+</STYLE_EXAMPLES>
 
-<LIVE_WEB_DATA>
-{web_data}
-</LIVE_WEB_DATA>
-
-<LOCAL_PDF_KNOWLEDGE>
+<PDF_KNOWLEDGE>
 {pdf_data}
-</LOCAL_PDF_KNOWLEDGE>
+</PDF_KNOWLEDGE>
 
-<MEETING_TRANSCRIPT>
+<WEB_RESEARCH>
+{web_data}
+</WEB_RESEARCH>
+
+<MEETING_NOTES>
 {transcript}
-</MEETING_TRANSCRIPT>
+</MEETING_NOTES>
 
-Now, write the custom email for the customer specifically discussed in the transcript:
+TASK: Write the final email draft now. Base the content ENTIRELY on the <MEETING_NOTES> above.
 """)
 
 # ==========================================
-# CORE FUNCTIONS
+# CORE SERVICES
 # ==========================================
 def setup_directories():
     """Ensure all required directories exist."""
-    for d in [TRANSCRIPTS_DIR, OUTPUTS_DIR, ATTACHMENTS_DIR, SEEDS_DIR]:
+    for d in [Config.TRANSCRIPTS_DIR, Config.OUTPUTS_DIR, Config.ATTACHMENTS_DIR, Config.SEEDS_DIR]:
         os.makedirs(d, exist_ok=True)
 
 def load_seed_emails() -> str:
     """Dynamically load few-shot examples from the seeds directory."""
     seeds_text = ""
-    if os.path.exists(SEEDS_DIR):
-        for filename in os.listdir(SEEDS_DIR):
+    if os.path.exists(Config.SEEDS_DIR):
+        for filename in os.listdir(Config.SEEDS_DIR):
             if filename.endswith(".txt"):
-                filepath = os.path.join(SEEDS_DIR, filename)
+                filepath = os.path.join(Config.SEEDS_DIR, filename)
                 with open(filepath, 'r', encoding='utf-8') as f:
                     seeds_text += f"--- Example: {filename} ---\n{f.read().strip()}\n\n"
-                
     return seeds_text or "No seed examples provided. Please use a professional, concise Sales Engineer tone."
 
 def get_vector_store() -> Chroma:
-    """Retrieves or creates the Chroma vector store collection."""
     return Chroma(client=chroma_client, collection_name="sophos_docs", embedding_function=embeddings)
 
 def ingest_pdfs_on_startup():
     global global_bm25_retriever
-    
     logger.info("Checking for new PDFs in /attachments to index...")
     
     try:
@@ -139,10 +136,10 @@ def ingest_pdfs_on_startup():
     vector_store = get_vector_store()
     documents = []
     
-    if os.path.exists(ATTACHMENTS_DIR):
-        for filename in os.listdir(ATTACHMENTS_DIR):
+    if os.path.exists(Config.ATTACHMENTS_DIR):
+        for filename in os.listdir(Config.ATTACHMENTS_DIR):
             if filename.lower().endswith(".pdf"):
-                file_path = os.path.join(ATTACHMENTS_DIR, filename)
+                file_path = os.path.join(Config.ATTACHMENTS_DIR, filename)
                 logger.info(f"Parsing {filename} into Markdown...")
                 try:
                     md_text = pymupdf4llm.to_markdown(file_path)
@@ -158,50 +155,46 @@ def ingest_pdfs_on_startup():
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=300)
     splits = text_splitter.split_documents(documents)
     
-    # 1. Build the Dense Vector Database (Chroma)
     vector_store.add_documents(splits)
     logger.info(f"Successfully indexed {len(splits)} Markdown chunks into ChromaDB!")
     
-    # 2. Build the Sparse Keyword Database (BM25)
     logger.info("Building BM25 Keyword Index for Hybrid Search...")
     global_bm25_retriever = BM25Retriever.from_documents(splits)
-    global_bm25_retriever.k = 3
+    global_bm25_retriever.k = 8  # Increased from 3 to feed the larger LLM context
 
 def execute_web_search(topics: str) -> str:
-    """Queries DuckDuckGo for live data across specified domains."""
-    
-    # Truncate to top 3 terms to avoid crashing DDG
-    top_topics_list = [t.strip() for t in topics.split(',')]
-    clean_topics = " ".join(top_topics_list[:3])
-    
-    logger.info(f"Truncated search query to top terms: {clean_topics}")
-    
+    topics_list = [t.strip() for t in topics.split(',') if t.strip()]
+    if len(topics_list) == 1:
+        topics_list = [topics[:60]]
+        
     web_results = ""
-    for domain in ["sophos.com", "secureworks.com"]:
-        try:
-            res = search_tool.run(f"site:{domain} {clean_topics}")
-            web_results += f"{domain.upper()} RESULTS:\n{res}\n\n"
-        except Exception as e:
-            logger.warning(f"Search failed for {domain}: {e}")
-            
+    for topic in topics_list[:2]:
+        logger.info(f"Querying web specifically for: {topic}")
+        for domain in ["sophos.com", "secureworks.com"]:
+            try:
+                time.sleep(1.5) # Prevents DDG rate-limiting
+                res = search_tool.run(f"site:{domain} {topic}")
+                if res and "No good DuckDuckGo Search Result" not in res:
+                    web_results += f"{domain.upper()} - {topic}:\n{res}\n\n"
+            except Exception as e:
+                logger.warning(f"DDG Search failed for '{topic}' on {domain}: {e}")
+                
     return web_results.strip() or "No live web data available at this time."
 
 def package_eml_file(body: str, attachments: list, source_path: str):
-    """Wraps the generated Markdown text into a rich HTML .eml file."""
     msg = EmailMessage()
     msg['Subject'] = "Follow-up regarding our recent discussion"
     msg['From'] = "youremail@yourcompany.com" 
     msg['To'] = "customer@example.com"
-    msg['X-Unsent'] = '1' # Forces Outlook to open as a draft
+    msg['X-Unsent'] = '1'
     
     msg.set_content(body)
-    
     html_body = markdown.markdown(body)
     full_html = f"<html><body>{html_body}</body></html>"
     msg.add_alternative(full_html, subtype='html')
 
     for filename in attachments:
-        filepath = os.path.join(ATTACHMENTS_DIR, filename)
+        filepath = os.path.join(Config.ATTACHMENTS_DIR, filename)
         if os.path.exists(filepath):
             ctype, encoding = mimetypes.guess_type(filepath)
             if ctype is None or encoding is not None:
@@ -213,149 +206,140 @@ def package_eml_file(body: str, attachments: list, source_path: str):
                 logger.info(f"Attached document: {filename}")
 
     base_name = os.path.basename(source_path).replace('.txt', '')
-    output_file = os.path.join(OUTPUTS_DIR, f"Draft_{base_name}.eml")
+    output_file = os.path.join(Config.OUTPUTS_DIR, f"Draft_{base_name}.eml")
     
     with open(output_file, 'wb') as f:
         f.write(bytes(msg))
-    
     logger.info(f"Success! Ready to send: {output_file}")
 
-
 def clean_transcript_with_glossary(text: str) -> str:
-    if not os.path.exists(GLOSSARY_FILE):
+    if not os.path.exists(Config.GLOSSARY_FILE):
         return text
-        
     try:
-        with open(GLOSSARY_FILE, 'r', encoding='utf-8') as f:
+        with open(Config.GLOSSARY_FILE, 'r', encoding='utf-8') as f:
             glossary = yaml.safe_load(f)
-            
         if glossary:
             for key in sorted(glossary.keys(), key=len, reverse=True):
                 pattern = re.compile(r'\b' + re.escape(key) + r'\b', re.IGNORECASE)
                 text = pattern.sub(glossary[key], text)
-                
     except Exception as e:
         logger.error(f"Failed to apply glossary: {e}")
-        
     return text
 
+def process_transcript(file_path: str):
+    """The core pipeline for orchestrating LLM generation."""
+    with open(file_path, 'r', encoding='utf-8') as f:
+        raw_transcript = f.read()
+        
+    logger.info("Applying custom glossary corrections to transcript...")
+    transcript = clean_transcript_with_glossary(raw_transcript)
+
+    try:
+        logger.info("Extracting key topics...")
+        topics = (EXTRACTION_PROMPT | llm).invoke({"transcript": transcript}).strip()
+        
+        logger.info(f"Searching web for topics: {topics}")
+        web_data = execute_web_search(topics)
+
+        logger.info("Running Native Hybrid Search (ChromaDB + BM25)...")
+        vector_store = get_vector_store()
+        chroma_retriever = vector_store.as_retriever(search_kwargs={"k": 8}) # Increased from 3
+        
+        if global_bm25_retriever:
+            bm25_docs = global_bm25_retriever.invoke(topics)
+            chroma_docs = chroma_retriever.invoke(topics)
+            
+            fused_scores = {}
+            doc_map = {}
+            for docs in [bm25_docs, chroma_docs]:
+                for rank, doc in enumerate(docs):
+                    content = doc.page_content
+                    if content not in fused_scores:
+                        fused_scores[content] = 0
+                        doc_map[content] = doc
+                    fused_scores[content] += 1 / (rank + 60)
+                    
+            sorted_items = sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)
+            pdf_results = [doc_map[content] for content, score in sorted_items][:8] # Top 8
+        else:
+            pdf_results = chroma_retriever.invoke(topics)
+        
+        pdf_context = ""
+        files_to_attach = set() 
+        for doc in pdf_results:
+            pdf_context += f"Source File: {doc.metadata['source']}\nContent: {doc.page_content}\n\n"
+            files_to_attach.add(os.path.basename(doc.metadata['source']))
+            
+        logger.info("Generating final email draft...")
+        email_body = (EMAIL_PROMPT | llm).invoke({
+            "seed_emails": load_seed_emails(),
+            "web_data": web_data,
+            "pdf_data": pdf_context,
+            "transcript": transcript
+        })
+        
+        logger.info("Applying formatting cleanup and extracting attachment decisions...")
+        final_attachments = []
+        attach_match = re.search(r'ATTACHMENTS:\s*(.+)', email_body, re.IGNORECASE)
+        
+        if attach_match:
+            attach_str = attach_match.group(1).strip()
+            if "NONE" not in attach_str.upper():
+                for file in files_to_attach:
+                    if file in attach_str:
+                        final_attachments.append(file)
+            email_body = email_body[:attach_match.start()].strip()
+
+        match = re.search(r'^(Hi\s|Hello\s|Dear\s|Hey\s|Good\s)', email_body, re.MULTILINE | re.IGNORECASE)
+        if match:
+            email_body = email_body[match.start():]
+
+        logger.info(f"Packaging .eml file with {len(final_attachments)} approved attachments...")
+        package_eml_file(email_body, final_attachments, file_path)
+
+    except Exception as e:
+        logger.error(f"Failed to process transcript: {e}", exc_info=True)
+
+
 # ==========================================
-# EVENT HANDLERS (With Debounce)
+# EVENT HANDLERS
 # ==========================================
 
-processed_files = {}
-DEBOUNCE_SECONDS = 15
+class DebouncedEventHandler(FileSystemEventHandler):
+    """Base class to prevent duplicate macOS file events from triggering multiple runs."""
+    def __init__(self):
+        self.processed_files = {}
 
-class AttachmentHandler(FileSystemEventHandler):
+    def is_debounced(self, path: str) -> bool:
+        current_time = time.time()
+        if current_time - self.processed_files.get(path, 0) < Config.DEBOUNCE_SECONDS:
+            return True
+        self.processed_files[path] = current_time
+        return False
+
+class AttachmentHandler(DebouncedEventHandler):
     def on_created(self, event):
         if event.is_directory or not event.src_path.lower().endswith('.pdf'):
             return
-            
-        current_time = time.time()
-        if current_time - processed_files.get(event.src_path, 0) < DEBOUNCE_SECONDS:
+        if self.is_debounced(event.src_path):
             return
-        processed_files[event.src_path] = current_time
-        
+            
         logger.info(f"New PDF detected: {event.src_path}")
         time.sleep(2)
-        
         logger.info("Rebuilding vector database with new attachments...")
         ingest_pdfs_on_startup()
 
 
-class TranscriptHandler(FileSystemEventHandler):
+class TranscriptHandler(DebouncedEventHandler):
     def on_created(self, event):
         if event.is_directory or not event.src_path.endswith('.txt'):
             return
-            
-        current_time = time.time()
-        if current_time - processed_files.get(event.src_path, 0) < DEBOUNCE_SECONDS:
+        if self.is_debounced(event.src_path):
             return 
-        processed_files[event.src_path] = current_time
-        
+            
         logger.info(f"New transcript detected: {event.src_path}")
         time.sleep(1) 
-        
-        with open(event.src_path, 'r', encoding='utf-8') as f:
-            raw_transcript = f.read()
-            
-        logger.info("Applying custom glossary corrections to transcript...")
-        transcript = clean_transcript_with_glossary(raw_transcript)
-
-        try:
-            # 1. Topic Extraction
-            logger.info("Extracting key topics...")
-            topics = (EXTRACTION_PROMPT | llm).invoke({"transcript": transcript}).strip()
-            
-            # 2. Live Web Search
-            logger.info(f"Searching web for topics: {topics}")
-            web_data = execute_web_search(topics)
-
-            # 3. Native Hybrid Search (ChromaDB + BM25)
-            logger.info("Running Native Hybrid Search (ChromaDB + BM25)...")
-            vector_store = get_vector_store()
-            chroma_retriever = vector_store.as_retriever(search_kwargs={"k": 3})
-            
-            if global_bm25_retriever:
-                bm25_docs = global_bm25_retriever.invoke(topics)
-                chroma_docs = chroma_retriever.invoke(topics)
-                
-                fused_scores = {}
-                doc_map = {}
-                
-                for docs in [bm25_docs, chroma_docs]:
-                    for rank, doc in enumerate(docs):
-                        content = doc.page_content
-                        if content not in fused_scores:
-                            fused_scores[content] = 0
-                            doc_map[content] = doc
-                        fused_scores[content] += 1 / (rank + 60)
-                        
-                sorted_items = sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)
-                pdf_results = [doc_map[content] for content, score in sorted_items][:3]
-                
-            else:
-                pdf_results = chroma_retriever.invoke(topics)
-            
-            pdf_context = ""
-            files_to_attach = set() 
-            for doc in pdf_results:
-                pdf_context += f"Source File: {doc.metadata['source']}\nContent: {doc.page_content}\n\n"
-                files_to_attach.add(os.path.basename(doc.metadata['source']))
-                
-            # 4. Email Generation
-            logger.info("Generating final email draft...")
-            email_body = (EMAIL_PROMPT | llm).invoke({
-                "seed_emails": load_seed_emails(),
-                "web_data": web_data,
-                "pdf_data": pdf_context,
-                "transcript": transcript
-            })
-            
-            # 5. Clean AI Preambles and Extract Attachments
-            logger.info("Applying formatting cleanup and extracting attachment decisions...")
-            
-            final_attachments = []
-            attach_match = re.search(r'ATTACHMENTS:\s*(.+)', email_body, re.IGNORECASE)
-            
-            if attach_match:
-                attach_str = attach_match.group(1).strip()
-                if "NONE" not in attach_str.upper():
-                    for file in files_to_attach:
-                        if file in attach_str:
-                            final_attachments.append(file)
-                email_body = email_body[:attach_match.start()].strip()
-
-            match = re.search(r'^(Hi\s|Hello\s|Dear\s|Hey\s|Good\s)', email_body, re.MULTILINE | re.IGNORECASE)
-            if match:
-                email_body = email_body[match.start():]
-
-            # 6. Package to Outlook
-            logger.info(f"Packaging .eml file with {len(final_attachments)} approved attachments...")
-            package_eml_file(email_body, final_attachments, event.src_path)
-
-        except Exception as e:
-            logger.error(f"Failed to process transcript: {e}", exc_info=True)
+        process_transcript(event.src_path)
 
 
 if __name__ == "__main__":
@@ -364,14 +348,14 @@ if __name__ == "__main__":
 
     transcript_handler = TranscriptHandler()
     transcript_observer = PollingObserver()
-    transcript_observer.schedule(transcript_handler, path=TRANSCRIPTS_DIR, recursive=False)
+    transcript_observer.schedule(transcript_handler, path=Config.TRANSCRIPTS_DIR, recursive=False)
     
     attachment_handler = AttachmentHandler()
     attachment_observer = PollingObserver()
-    attachment_observer.schedule(attachment_handler, path=ATTACHMENTS_DIR, recursive=False)
+    attachment_observer.schedule(attachment_handler, path=Config.ATTACHMENTS_DIR, recursive=False)
     
-    logger.info(f"Watching for transcripts in {TRANSCRIPTS_DIR}...")
-    logger.info(f"Watching for new PDFs in {ATTACHMENTS_DIR}...")
+    logger.info(f"Watching for transcripts in {Config.TRANSCRIPTS_DIR}...")
+    logger.info(f"Watching for new PDFs in {Config.ATTACHMENTS_DIR}...")
     
     transcript_observer.start()
     attachment_observer.start()
