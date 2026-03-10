@@ -40,6 +40,10 @@ class Config:
     SEEDS_DIR = os.path.join(BASE_DIR, "seeds")
     GLOSSARY_FILE = os.path.join(BASE_DIR, "glossary.yml")
     DEBOUNCE_SECONDS = 15
+    
+    # User Identity Variables
+    SE_NAME = os.getenv("SE_NAME", "Sales Engineer")
+    SE_COMPANY = os.getenv("SE_COMPANY", "Sophos and Secureworks")
 
 # Initialize Models and Tools (Mistral Small Upgrade)
 llm = OllamaLLM(
@@ -57,12 +61,12 @@ chroma_client = chromadb.HttpClient(host="chromadb", port=8000)
 global_bm25_retriever = None
 
 # ==========================================
-# PROMPT TEMPLATES (Unlocked for Nuance)
+# PROMPT TEMPLATES 
 # ==========================================
 
 EXTRACTION_PROMPT = PromptTemplate.from_template("""
 You are an expert cybersecurity architect. Read the following raw voice-to-text meeting transcript.
-Your goal is to identify the single most critical Sophos or Secureworks product discussed that requires follow-up research.
+Your goal is to identify the single most critical {se_company} product discussed that requires follow-up research.
 
 CRITICAL RULE: Correct any phonetic spelling errors (e.g., "Sofos" -> "Sophos").
 
@@ -72,12 +76,12 @@ TRANSCRIPT:
 """)
 
 EMAIL_PROMPT = PromptTemplate.from_template("""
-You are an expert Cybersecurity Sales Engineer. Your ONLY job is to write a brand new follow-up email to a customer based strictly on the MEETING_NOTES provided below.
+You are {se_name}, an expert Cybersecurity Sales Engineer at {se_company}. Your ONLY job is to write a brand new follow-up email to a customer based strictly on the MEETING_NOTES provided below.
 
 <CRITICAL_RULES>
-1. FACTUAL ACCURACY: Base your business recap and action items strictly on the <MEETING_NOTES>. Do not invent deliverables.
+1. FACTUAL ACCURACY: Base your business recap and action items strictly on the <MEETING_NOTES>. Do not invent deliverables. Specifically look for tasks assigned to {se_name} and list those as our next steps.
 2. STYLE TRANSFER: Analyze the <STYLE_EXAMPLES> to understand the author's tone, sentence length, and formatting preferences. Write your brand new email using this exact persona.
-3. TRANSCRIPTION CORRECTION: The notes contain phonetic errors. Automatically correct industry terms (e.g., "Sofos" -> "Sophos", "manage thread response" -> "MDR").
+3. TRANSCRIPTION CORRECTION: The notes contain phonetic errors. Automatically correct industry terms.
 4. DIRECT ADDRESS: Write directly to the customer (e.g., "Great speaking with you...").
 5. ATTACHMENTS: At the bottom of the email, list the exact filenames of any highly relevant PDFs from the <PDF_KNOWLEDGE> section in this format: ATTACHMENTS: file1.pdf, file2.pdf (If none are relevant, output ATTACHMENTS: NONE).
 </CRITICAL_RULES>
@@ -105,12 +109,10 @@ TASK: Write the final email draft now. Base the content ENTIRELY on the <MEETING
 # CORE SERVICES
 # ==========================================
 def setup_directories():
-    """Ensure all required directories exist."""
     for d in [Config.TRANSCRIPTS_DIR, Config.OUTPUTS_DIR, Config.ATTACHMENTS_DIR, Config.SEEDS_DIR]:
         os.makedirs(d, exist_ok=True)
 
 def load_seed_emails() -> str:
-    """Dynamically load few-shot examples from the seeds directory."""
     seeds_text = ""
     if os.path.exists(Config.SEEDS_DIR):
         for filename in os.listdir(Config.SEEDS_DIR):
@@ -160,7 +162,7 @@ def ingest_pdfs_on_startup():
     
     logger.info("Building BM25 Keyword Index for Hybrid Search...")
     global_bm25_retriever = BM25Retriever.from_documents(splits)
-    global_bm25_retriever.k = 8  # Increased from 3 to feed the larger LLM context
+    global_bm25_retriever.k = 8  
 
 def execute_web_search(topics: str) -> str:
     topics_list = [t.strip() for t in topics.split(',') if t.strip()]
@@ -172,7 +174,7 @@ def execute_web_search(topics: str) -> str:
         logger.info(f"Querying web specifically for: {topic}")
         for domain in ["sophos.com", "secureworks.com"]:
             try:
-                time.sleep(1.5) # Prevents DDG rate-limiting
+                time.sleep(1.5) 
                 res = search_tool.run(f"site:{domain} {topic}")
                 if res and "No good DuckDuckGo Search Result" not in res:
                     web_results += f"{domain.upper()} - {topic}:\n{res}\n\n"
@@ -184,7 +186,7 @@ def execute_web_search(topics: str) -> str:
 def package_eml_file(body: str, attachments: list, source_path: str):
     msg = EmailMessage()
     msg['Subject'] = "Follow-up regarding our recent discussion"
-    msg['From'] = "youremail@yourcompany.com" 
+    msg['From'] = f"{Config.SE_NAME} <youremail@yourcompany.com>" 
     msg['To'] = "customer@example.com"
     msg['X-Unsent'] = '1'
     
@@ -227,7 +229,6 @@ def clean_transcript_with_glossary(text: str) -> str:
     return text
 
 def process_transcript(file_path: str):
-    """The core pipeline for orchestrating LLM generation."""
     with open(file_path, 'r', encoding='utf-8') as f:
         raw_transcript = f.read()
         
@@ -236,14 +237,17 @@ def process_transcript(file_path: str):
 
     try:
         logger.info("Extracting key topics...")
-        topics = (EXTRACTION_PROMPT | llm).invoke({"transcript": transcript}).strip()
+        topics = (EXTRACTION_PROMPT | llm).invoke({
+            "transcript": transcript,
+            "se_company": Config.SE_COMPANY
+        }).strip()
         
         logger.info(f"Searching web for topics: {topics}")
         web_data = execute_web_search(topics)
 
         logger.info("Running Native Hybrid Search (ChromaDB + BM25)...")
         vector_store = get_vector_store()
-        chroma_retriever = vector_store.as_retriever(search_kwargs={"k": 8}) # Increased from 3
+        chroma_retriever = vector_store.as_retriever(search_kwargs={"k": 8}) 
         
         if global_bm25_retriever:
             bm25_docs = global_bm25_retriever.invoke(topics)
@@ -260,7 +264,7 @@ def process_transcript(file_path: str):
                     fused_scores[content] += 1 / (rank + 60)
                     
             sorted_items = sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)
-            pdf_results = [doc_map[content] for content, score in sorted_items][:8] # Top 8
+            pdf_results = [doc_map[content] for content, score in sorted_items][:8] 
         else:
             pdf_results = chroma_retriever.invoke(topics)
         
@@ -270,8 +274,10 @@ def process_transcript(file_path: str):
             pdf_context += f"Source File: {doc.metadata['source']}\nContent: {doc.page_content}\n\n"
             files_to_attach.add(os.path.basename(doc.metadata['source']))
             
-        logger.info("Generating final email draft...")
+        logger.info(f"Generating final email draft as {Config.SE_NAME}...")
         email_body = (EMAIL_PROMPT | llm).invoke({
+            "se_name": Config.SE_NAME,
+            "se_company": Config.SE_COMPANY,
             "seed_emails": load_seed_emails(),
             "web_data": web_data,
             "pdf_data": pdf_context,
@@ -300,13 +306,11 @@ def process_transcript(file_path: str):
     except Exception as e:
         logger.error(f"Failed to process transcript: {e}", exc_info=True)
 
-
 # ==========================================
 # EVENT HANDLERS
 # ==========================================
 
 class DebouncedEventHandler(FileSystemEventHandler):
-    """Base class to prevent duplicate macOS file events from triggering multiple runs."""
     def __init__(self):
         self.processed_files = {}
 
@@ -340,7 +344,6 @@ class TranscriptHandler(DebouncedEventHandler):
         logger.info(f"New transcript detected: {event.src_path}")
         time.sleep(1) 
         process_transcript(event.src_path)
-
 
 if __name__ == "__main__":
     setup_directories()

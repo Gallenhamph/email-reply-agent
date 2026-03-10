@@ -1,18 +1,22 @@
+version: '3.8'
+
 services:
-  app:
-    # -> CHANGE THIS LINE to your actual details <-
-    image: ghcr.io/gallenhamph/email-reply-agent:main
-    container_name: sophos_email_automator
+  sales_engineer_app:
+    build: .
+    container_name: se_automator_app
     restart: unless-stopped
     environment:
+      # --- USER CONFIGURATION ---
+      - SE_NAME= #<------ Change THIS!!!
+      - SE_COMPANY=Sophos and Secureworks
+      # --------------------------
       - OLLAMA_URL=http://host.docker.internal:11434
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     volumes:
       - ./transcripts:/app/transcripts
       - ./outputs:/app/outputs
       - ./attachments:/app/attachments
       - ./seeds:/app/seeds
+      - ./glossary.yml:/app/glossary.yml
     depends_on:
       - chromadb
     labels:
@@ -20,9 +24,17 @@ services:
 
   chromadb:
     image: chromadb/chroma:latest
-    container_name: sophos_chromadb
+    container_name: se_automator_chromadb
     restart: unless-stopped
-    volumes:
-      - ./chroma_data:/chroma/chroma
     ports:
       - "8000:8000"
+    volumes:
+      - ./chroma_data:/chroma/chroma
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: --interval 300 --label-enable --cleanup
